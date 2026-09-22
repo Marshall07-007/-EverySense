@@ -66,7 +66,7 @@ const UsabilityRating = forwardRef<UsabilityRatingRef>((_, ref) => {
     setSubmitting(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const { data: sessionData } = await supabase.auth.getSession();
-    const authUserId = sessionData.session?.user?.id ?? null;
+    const authUserId = sessionData.session?.user?.id ?? 'anonymous';
 
     await submitFeedback({
       type: 'rating',

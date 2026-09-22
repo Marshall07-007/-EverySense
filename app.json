@@ -1,34 +1,27 @@
 {
   "expo": {
-    "name": "AccessAid",
-    "slug": "accessaid",
-    "scheme": "accessaid",
+    "name": "EverySense",
+    "slug": "everysense",
+    "scheme": "everysense",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0F172A"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.accessaid.app",
+      "bundleIdentifier": "com.everysense.app",
       "infoPlist": {
-        "NSCameraUsageDescription": "AccessAid uses the camera to capture images for AI text reading.",
-        "NSPhotoLibraryUsageDescription": "AccessAid needs access to your photo library to pick images for text extraction.",
-        "NSPhotoLibraryAddUsageDescription": "AccessAid saves processed images to your photo library.",
-        "NSMicrophoneUsageDescription": "AccessAid uses the microphone for voice commands and accessibility features.",
-        "NSLocationWhenInUseUsageDescription": "AccessAid uses your location to find accessible places nearby.",
-        "NSLocationAlwaysUsageDescription": "AccessAid uses your location to find accessible places nearby."
+        "NSCameraUsageDescription": "EverySense uses the camera to capture images for AI text reading and visual awareness.",
+        "NSPhotoLibraryUsageDescription": "EverySense needs access to your photo library to pick images for text extraction.",
+        "NSPhotoLibraryAddUsageDescription": "EverySense saves processed images to your photo library.",
+        "NSMicrophoneUsageDescription": "EverySense uses the microphone for voice commands and accessibility features."
       }
     },
     "android": {
-      "package": "com.accessaid.app",
+      "package": "com.everysense.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png"
@@ -37,9 +30,7 @@
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
-        "RECORD_AUDIO",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "RECORD_AUDIO"
       ],
       "softwareKeyboardLayoutMode": "pan"
     },
@@ -55,32 +46,29 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow AccessAid to capture images for text extraction."
+          "cameraPermission": "Allow EverySense to capture images for text extraction and visual analysis."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow AccessAid to access your photos for text extraction.",
-          "cameraPermission": "Allow AccessAid to use the camera for capturing text."
+          "photosPermission": "Allow EverySense to access your photos for text extraction.",
+          "cameraPermission": "Allow EverySense to use the camera for capturing text."
         }
       ],
       "expo-document-picker",
-      "expo-notifications",
       [
         "expo-speech-recognition",
         {
-          "microphonePermission": "Allow AccessAid to use the microphone for voice commands.",
-          "speechRecognitionPermission": "Allow AccessAid to recognize speech for voice commands."
+          "microphonePermission": "Allow EverySense to use the microphone for voice commands.",
+          "speechRecognitionPermission": "Allow EverySense to recognize speech for voice commands."
         }
       ],
       "expo-web-browser",
-      [
-        "expo-location",
-        {
-          "locationWhenInUsePermission": "AccessAid uses your location to find accessible places nearby."
-        }
-      ]
+      "expo-sqlite",
+      "@react-native-community/datetimepicker",
+      "expo-status-bar",
+      "expo-font"
     ],
     "experiments": {
       "tsconfigPaths": true
@@ -89,7 +77,7 @@
       "eas": {
         "projectId": ""
       },
-      "appDisplayName": "AccessAid"
+      "appDisplayName": "EverySense"
     }
   }
 }

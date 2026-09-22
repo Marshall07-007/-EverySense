@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ViewStyle,
   TextStyle,
+  StyleProp,
   ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -18,8 +19,8 @@ interface ModernButtonProps {
   disabled?: boolean;
   loading?: boolean;
   icon?: React.ReactNode;
-  style?: ViewStyle;
-  textStyle?: TextStyle;
+  style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
   hapticFeedback?: boolean;
   accessibilityLabel?: string;
 }
@@ -44,8 +45,8 @@ export const ModernButton: React.FC<ModernButtonProps> = ({
     onPress();
   };
 
-  const getButtonStyle = () => {
-    const baseStyle = [styles.button, styles[size]];
+  const getButtonStyle = (): StyleProp<ViewStyle> => {
+    const baseStyle: StyleProp<ViewStyle>[] = [styles.button, styles[size]];
     
     if (disabled || loading) {
       baseStyle.push(styles.disabled);
@@ -54,10 +55,13 @@ export const ModernButton: React.FC<ModernButtonProps> = ({
     return baseStyle;
   };
 
-  const getTextStyle = () => {
-    const baseTextStyle = [styles.text, styles[`${size}Text`]];
+  const getTextStyle = (): StyleProp<TextStyle> => {
+    const sizeKey = `${size}Text` as 'smallText' | 'mediumText' | 'largeText';
+    const baseTextStyle: StyleProp<TextStyle>[] = [styles.text, styles[sizeKey]];
     
-    if (variant === 'outline') {
+    if (variant === 'primary') {
+      baseTextStyle.push(styles.primaryText);
+    } else if (variant === 'outline') {
       baseTextStyle.push(styles.outlineText);
     } else if (variant === 'secondary') {
       baseTextStyle.push(styles.secondaryText);
@@ -78,10 +82,10 @@ export const ModernButton: React.FC<ModernButtonProps> = ({
         <>
           <ActivityIndicator 
             size="small" 
-            color={variant === 'outline' ? '#4A90E2' : 'white'} 
+            color={variant === 'primary' ? '#0B1020' : '#D6B36A'} 
           />
-          <Text style={[getTextStyle(), { marginLeft: 8 }]}>
-            Loading...
+          <Text style={[getTextStyle(), textStyle, { marginLeft: 8 }]}>
+            One moment...
           </Text>
         </>
       );
@@ -90,7 +94,7 @@ export const ModernButton: React.FC<ModernButtonProps> = ({
     return (
       <>
         {icon && <>{icon}</>}
-        <Text style={[getTextStyle(), icon && { marginLeft: 8 }]}>
+        <Text style={[getTextStyle(), textStyle, icon ? { marginLeft: 8 } : undefined]}>
           {title}
         </Text>
       </>
@@ -111,14 +115,15 @@ export const ModernButton: React.FC<ModernButtonProps> = ({
     );
   }
 
+  const gradientColors: [string, string] =
+    variant === 'primary' ? ['#E5C98A', '#D6B36A'] :
+    variant === 'secondary' ? ['#1B243B', '#151D32'] :
+    variant === 'danger' ? ['#E06A6A', '#C85656'] :
+    ['#E5C98A', '#D6B36A'];
+
   return (
     <LinearGradient
-      colors={
-        variant === 'primary' ? ['#4A90E2', '#357ABD'] :
-        variant === 'secondary' ? ['#6C757D', '#5A6268'] :
-        variant === 'danger' ? ['#FF6B6B', '#E53E3E'] :
-        ['#4A90E2', '#357ABD']
-      }
+      colors={gradientColors}
       style={[getButtonStyle(), style]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
@@ -142,14 +147,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 6,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    shadowColor: '#050811',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
   },
   touchable: {
     flex: 1,
@@ -162,7 +166,7 @@ const styles = StyleSheet.create({
   small: {
     paddingVertical: 8,
     paddingHorizontal: 16,
-    minHeight: 36,
+    minHeight: 44, // 44px min touch target
   },
   medium: {
     paddingVertical: 12,
@@ -170,45 +174,50 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
   large: {
-    paddingVertical: 16,
+    paddingVertical: 14,
     paddingHorizontal: 24,
-    minHeight: 56,
+    minHeight: 54,
   },
   outline: {
     backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: '#4A90E2',
+    borderWidth: 1.5,
+    borderColor: '#D6B36A',
     shadowOpacity: 0,
     elevation: 0,
   },
   disabled: {
-    opacity: 0.6,
+    opacity: 0.45,
     shadowOpacity: 0,
     elevation: 0,
   },
   text: {
     fontWeight: '600',
     textAlign: 'center',
+    letterSpacing: 0.3,
   },
   smallText: {
     fontSize: 14,
   },
   mediumText: {
-    fontSize: 16,
+    fontSize: 15,
   },
   largeText: {
-    fontSize: 18,
+    fontSize: 16,
+  },
+  primaryText: {
+    color: '#0B1020', // High contrast royal text on champagne gold
+    fontWeight: '700',
   },
   outlineText: {
-    color: '#4A90E2',
+    color: '#D6B36A',
   },
   secondaryText: {
-    color: 'white',
+    color: '#F7F3EA',
   },
   dangerText: {
-    color: 'white',
+    color: '#FFFFFF',
   },
   disabledText: {
-    opacity: 0.7,
+    opacity: 0.8,
   },
 });

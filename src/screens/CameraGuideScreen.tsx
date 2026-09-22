@@ -12,6 +12,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -62,7 +63,7 @@ const CameraGuideScreen = ({ navigation }: { navigation: any }) => {
     return () => {
       isMountedRef.current = false;
       if (autoTimer.current) clearInterval(autoTimer.current);
-      try { Speech.stop(); } catch {}
+      ttsStopSpeaking();
     };
   }, []);
 
@@ -80,26 +81,8 @@ const CameraGuideScreen = ({ navigation }: { navigation: any }) => {
     }
   }, [isScanning]);
 
-  // Keep the ref in sync so the interval always calls the latest captureAndAnalyse
-  useEffect(() => {
-    captureAndAnalyseRef.current = captureAndAnalyse;
-  }, [captureAndAnalyse]);
-
-  // Auto-scan timer — uses ref to avoid stale closure
-  useEffect(() => {
-    if (autoScan) {
-      autoTimer.current = setInterval(() => {
-        captureAndAnalyseRef.current();
-      }, AUTO_SCAN_INTERVAL_MS);
-    } else {
-      if (autoTimer.current) clearInterval(autoTimer.current);
-    }
-    return () => { if (autoTimer.current) clearInterval(autoTimer.current); };
-  }, [autoScan]);
-
   const speak = useCallback((text: string) => {
-    try { Speech.stop(); } catch {}
-    try { Speech.speak(text, { rate: state.accessibilitySettings.voiceSpeed }); } catch {}
+    ttsSpeakText(text, { rate: state.accessibilitySettings.voiceSpeed });
   }, [state.accessibilitySettings.voiceSpeed]);
 
   const captureAndAnalyse = useCallback(async () => {
@@ -142,6 +125,23 @@ const CameraGuideScreen = ({ navigation }: { navigation: any }) => {
       if (isMountedRef.current) setIsScanning(false);
     }
   }, [isScanning, autoScan, speak]);
+
+  // Keep the ref in sync so the interval always calls the latest captureAndAnalyse
+  useEffect(() => {
+    captureAndAnalyseRef.current = captureAndAnalyse;
+  }, [captureAndAnalyse]);
+
+  // Auto-scan timer — uses ref to avoid stale closure
+  useEffect(() => {
+    if (autoScan) {
+      autoTimer.current = setInterval(() => {
+        captureAndAnalyseRef.current();
+      }, AUTO_SCAN_INTERVAL_MS);
+    } else {
+      if (autoTimer.current) clearInterval(autoTimer.current);
+    }
+    return () => { if (autoTimer.current) clearInterval(autoTimer.current); };
+  }, [autoScan]);
 
   // ── Permission gate ──────────────────────────────────────────────────────────
 
@@ -265,7 +265,7 @@ const CameraGuideScreen = ({ navigation }: { navigation: any }) => {
           {/* Stop speech */}
           <TouchableOpacity
             style={[styles.autoBtn, { borderColor: '#ef4444' }]}
-            onPress={() => { try { Speech.stop(); } catch {} }}
+            onPress={() => { ttsStopSpeaking(); }}
           >
             <Ionicons name="volume-mute-outline" size={20} color="#ef4444" />
             <Text style={[styles.autoBtnText, { color: '#ef4444' }]}>Mute</Text>
@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
   camera:     { flex: 1 },
 
   // Corner frame
-  frameOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  frameOverlay: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   frameTL: { position: 'absolute', top: 40, left: 30, width: CORNER, height: CORNER, borderTopWidth: BORDER, borderLeftWidth: BORDER, borderColor: CORNER_COLOR, borderTopLeftRadius: 6 },
   frameTR: { position: 'absolute', top: 40, right: 30, width: CORNER, height: CORNER, borderTopWidth: BORDER, borderRightWidth: BORDER, borderColor: CORNER_COLOR, borderTopRightRadius: 6 },
   frameBL: { position: 'absolute', bottom: 40, left: 30, width: CORNER, height: CORNER, borderBottomWidth: BORDER, borderLeftWidth: BORDER, borderColor: CORNER_COLOR, borderBottomLeftRadius: 6 },

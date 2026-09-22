@@ -10,6 +10,8 @@ export type AppTheme = {
   gradient: string[];
   background: string;
   overlay: string;
+  surface: string;
+  surfaceSecondary: string;
   cardBackground: string;
   cardBorder: string;
   cardShadow: string;
@@ -19,6 +21,11 @@ export type AppTheme = {
   textInverted: string;
   accent: string;
   accentSoft: string;
+  gold: string;
+  goldSoft: string;
+  goldBorder: string;
+  teal: string;
+  blue: string;
   success: string;
   danger: string;
   warning: string;
@@ -30,98 +37,130 @@ export type AppTheme = {
   fabBackground: string;
   fabShadow: string;
   modalBackground: string;
+  divider: string;
 };
+
+export const Spacing = {
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 20,
+  xxl: 24,
+  xxxl: 32,
+  huge: 40,
+  giant: 48,
+} as const;
+
+export const Radii = {
+  sm: 8,
+  md: 12,
+  card: 18,
+  large: 22,
+  pill: 999,
+} as const;
 
 export const getThemeConfig = (isDark: boolean): AppTheme => {
   if (isDark) {
     return {
       isDark: true,
-      gradient: ['#0F172A', '#1F2937', '#0F172A'],
-      background: '#0B1120',
-      overlay: 'rgba(0, 0, 0, 0.65)',
-      cardBackground: '#1F2937',
-      cardBorder: '#334155',
-      cardShadow: '#000000',
-      textPrimary: '#F8FAFC',
-      textSecondary: '#CBD5F5',
-      textMuted: '#94A3B8',
-      textInverted: '#F8FAFC',
-      accent: '#60A5FA',
-      accentSoft: 'rgba(96, 165, 250, 0.2)',
+      gradient: ['#0B1020', '#10172A', '#0B1020'],
+      background: '#0B1020',
+      overlay: 'rgba(5, 8, 16, 0.75)',
+      surface: '#151D32',
+      surfaceSecondary: '#1B243B',
+      cardBackground: '#151D32',
+      cardBorder: 'rgba(214, 179, 106, 0.16)',
+      cardShadow: '#050811',
+      textPrimary: '#F7F3EA',
+      textSecondary: '#A9B0BF',
+      textMuted: '#747E93',
+      textInverted: '#0B1020',
+      accent: '#D6B36A', // Champagne Gold
+      accentSoft: 'rgba(214, 179, 106, 0.14)',
+      gold: '#D6B36A',
+      goldSoft: '#E5C98A',
+      goldBorder: 'rgba(214, 179, 106, 0.28)',
+      teal: '#35C6A3',
+      blue: '#4F7CFF',
       success: '#34D399',
-      danger: '#F87171',
-      warning: '#FBBF24',
-      info: '#38BDF8',
-      inputBackground: '#111827',
-      inputBorder: '#1E293B',
-      placeholder: '#64748B',
-      tagBackground: '#1E293B',
-      fabBackground: '#2563EB',
-      fabShadow: '#1E40AF',
-      modalBackground: '#111827',
+      danger: '#E06A6A',
+      warning: '#E5C98A',
+      info: '#4F7CFF',
+      inputBackground: '#10172A',
+      inputBorder: 'rgba(214, 179, 106, 0.20)',
+      placeholder: '#626C80',
+      tagBackground: '#1B243B',
+      fabBackground: '#D6B36A',
+      fabShadow: '#050811',
+      modalBackground: '#151D32',
+      divider: 'rgba(214, 179, 106, 0.12)',
     };
   }
 
   return {
     isDark: false,
-    gradient: ['#667eea', '#764ba2', '#f093fb'],
-    background: '#FFFFFF',
-    overlay: 'rgba(15, 23, 42, 0.25)',
+    gradient: ['#FBF9F5', '#F5EFE6', '#FBF9F5'],
+    background: '#FBF9F5',
+    overlay: 'rgba(11, 16, 32, 0.40)',
+    surface: '#FFFFFF',
+    surfaceSecondary: '#F5EFE6',
     cardBackground: '#FFFFFF',
-    cardBorder: '#E2E8F0',
-    cardShadow: '#000000',
-    textPrimary: '#1F2933',
-    textSecondary: '#4B5563',
-    textMuted: '#6B7280',
+    cardBorder: 'rgba(184, 141, 59, 0.22)',
+    cardShadow: 'rgba(11, 16, 32, 0.06)',
+    textPrimary: '#0B1020',
+    textSecondary: '#4A5568',
+    textMuted: '#768294',
     textInverted: '#FFFFFF',
-    accent: '#4A90E2',
-    accentSoft: 'rgba(74, 144, 226, 0.15)',
-    success: '#22C55E',
-    danger: '#EF4444',
-    warning: '#F59E0B',
-    info: '#2563EB',
-    inputBackground: '#F8FAFC',
-    inputBorder: '#E2E8F0',
-    placeholder: '#94A3B8',
-    tagBackground: '#F3F4F6',
-    fabBackground: '#2563EB',
-    fabShadow: '#1D4ED8',
+    accent: '#B88D3B', // Antique Champagne Gold for high contrast
+    accentSoft: 'rgba(184, 141, 59, 0.12)',
+    gold: '#B88D3B',
+    goldSoft: '#D6B36A',
+    goldBorder: 'rgba(184, 141, 59, 0.32)',
+    teal: '#269A7E',
+    blue: '#3462DE',
+    success: '#28A745',
+    danger: '#D9534F',
+    warning: '#C69224',
+    info: '#3462DE',
+    inputBackground: '#F5EFE6',
+    inputBorder: 'rgba(184, 141, 59, 0.28)',
+    placeholder: '#8490A2',
+    tagBackground: '#EFE9DC',
+    fabBackground: '#B88D3B',
+    fabShadow: 'rgba(11, 16, 32, 0.12)',
     modalBackground: '#FFFFFF',
+    divider: 'rgba(184, 141, 59, 0.14)',
   };
 };
 
 /**
  * Light/dark color map used by _layout.tsx and themed components.
- * Uses the same values as getThemeConfig for consistency.
  */
 export const Colors = {
   light: {
-    tint: "#4A90E2",
-    background: "#FFFFFF",
-    text: "#1F2933",
-    icon: "#CBD5E0",
-    tabIconDefault: "#94A3B8",
-    tabIconSelected: "#4A90E2",
+    tint: "#B88D3B",
+    background: "#FBF9F5",
+    text: "#0B1020",
+    icon: "#768294",
+    tabIconDefault: "#768294",
+    tabIconSelected: "#B88D3B",
   },
   dark: {
-    tint: "#60A5FA",
-    background: "#0B1120",
-    text: "#F8FAFC",
-    icon: "#475569",
-    tabIconDefault: "#64748B",
-    tabIconSelected: "#60A5FA",
+    tint: "#D6B36A",
+    background: "#0B1020",
+    text: "#F7F3EA",
+    icon: "#747E93",
+    tabIconDefault: "#747E93",
+    tabIconSelected: "#D6B36A",
   },
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {

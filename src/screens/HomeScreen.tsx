@@ -2,7 +2,6 @@ import { Ionicons } from '@expo/vector-icons';
 import type { NavigationProp } from '@react-navigation/native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { MainTabParamList } from '../types';
-import { navigationRef } from '../navigation/AppNavigator';
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystemLegacy from 'expo-file-system/legacy';
@@ -11,6 +10,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -26,14 +26,20 @@ import {
   View,
 } from 'react-native';
 import { AppTheme, getThemeConfig } from '../../constants/theme';
-import { AccessAidLogo } from '../components/AccessAidLogo';
+import { EverySenseLogo } from '../components/EverySenseLogo';
 import { BackgroundLogo } from '../components/BackgroundLogo';
 import { ModernButton } from '../components/ModernButton';
 import { ModernCard } from '../components/ModernCard';
 import { useApp } from '../contexts/AppContext';
 import { supabase } from '../../lib/supabase';
 import { voiceManager } from '../utils/voiceCommandManager';
-import { sendImageMessage } from '../services/geminiService';
+import { sendImageMessage, analyzeSmartScanDocument } from '../services/geminiService';
+import { SmartScanUnderstandingCard } from '../components/SmartScanUnderstandingCard';
+import { WhatNextCard } from '../components/WhatNextCard';
+import { VoiceCommandCard } from '../components/VoiceCommandCard';
+import { parseUserVoiceIntent, ParsedIntentResult } from '../services/voiceIntentService';
+import type { SmartScanResult, WhatNextAction } from '../types';
+import { saveDocument } from '../utils/documentStorage';
 
 
 // Conditional import for clipboard (same pattern as ReminderScreen)
@@ -86,6 +92,303 @@ const HomeScreen = () => {
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [streakCount, setStreakCount] = useState(0);
+  const [isReadingAloud, setIsReadingAloud] = useState(false);
+
+  const handleReadAloudPress = () => {
+    if (isReadingAloud) {
+      ttsStopSpeaking();
+      setIsReadingAloud(false);
+      return;
+    }
+    if (!ttsText.trim()) {
+      Alert.alert('No Text', 'Please enter some text to read aloud.');
+      return;
+    }
+    setIsReadingAloud(true);
+    const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
+    ttsSpeakText(ttsText, {
+      rate: safeRate,
+      pitch: 1.0,
+      onDone: () => setIsReadingAloud(false),
+      onStopped: () => setIsReadingAloud(false),
+      onError: () => setIsReadingAloud(false),
+    });
+  };
+
+  // Smart Scan state
+  const [smartScanResult, setSmartScanResult] = useState<SmartScanResult | null>(null);
+  const [isSmartScanning, setIsSmartScanning] = useState(false);
+  const [smartScanStatus, setSmartScanStatus] = useState('');
+  const [smartScanError, setSmartScanError] = useState<string | null>(null);
+
+  const handleSmartScanCamera = async () => {
+    try {
+      console.error('[SmartScan Stage 1]: Camera Initiated');
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        console.error('[SmartScan Stage 1 Error]: Camera permission denied');
+        Alert.alert('Camera Permission Needed', 'Please allow camera access to scan bills and documents.');
+        speakText('Please allow camera access to scan documents.');
+        return;
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setIsSmartScanning(true);
+      setSmartScanError(null);
+      setSmartScanStatus('Capturing document...');
+
+      const res = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+      if (res.canceled || !res.assets?.[0]?.uri) {
+        console.error('[SmartScan Stage 1]: User canceled camera capture');
+        setIsSmartScanning(false);
+        setSmartScanStatus('');
+        return;
+      }
+
+      console.error('[SmartScan Stage 1]: Image Captured, width:', res.assets[0].width ?? 0, 'height:', res.assets[0].height ?? 0);
+
+      setSmartScanStatus('Understanding your document...');
+      speakText('Understanding your document with EverySense AI...');
+
+      console.error('[SmartScan Stage 2]: Converting Image to Base64 JPEG');
+      const manip = await ImageManipulator.manipulateAsync(
+        res.assets[0].uri,
+        [{ resize: { width: 900 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+
+      console.error('[SmartScan Stage 2]: Base64 length:', manip.base64?.length ?? 0);
+
+      if (!manip.base64) {
+        console.error('[SmartScan Stage 2 Error]: Base64 encoding failed');
+        throw new Error('Could not encode document image.');
+      }
+
+      const resultData = await analyzeSmartScanDocument(manip.base64, 'image/jpeg');
+      // Ensure imageUri is only stored if it's a file URI (not base64 data URI)
+      const safeUri = res.assets[0].uri && !res.assets[0].uri.startsWith('data:') ? res.assets[0].uri : undefined;
+      const fullResult: SmartScanResult = {
+        ...resultData,
+        imageUri: safeUri,
+      };
+
+      console.error('[SmartScan Stage 6]: Displaying Result Card docType:', fullResult.documentType, 'title:', fullResult.title);
+      setSmartScanResult(fullResult);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      speakText(`Smart Scan complete! Detected ${fullResult.documentType}. ${fullResult.explanation}`);
+    } catch (err: any) {
+      const isAbort = err?.name === 'AbortError' || err?.message?.toLowerCase().includes('canceled') || err?.message?.toLowerCase().includes('timed out');
+      console.error('[SmartScan Flow Error]:', isAbort ? `[AbortError/Timeout] ${err?.message || 'Canceled'}` : (err?.message || String(err)));
+      const isNetwork = !isAbort && (err?.message?.toLowerCase().includes('network') || err?.message?.toLowerCase().includes('failed to fetch') || err?.message?.toLowerCase().includes('reach'));
+      const errorMessage = isNetwork
+        ? "EverySense couldn't reach the AI service. Check your connection and try again."
+        : "We couldn't understand this document. Try another image.";
+      setSmartScanError(errorMessage);
+      speakText(errorMessage);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsSmartScanning(false);
+      setSmartScanStatus('');
+    }
+  };
+
+  const handleSmartScanGallery = async () => {
+    try {
+      console.error('[SmartScan Stage 1]: Gallery Initiated');
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        console.error('[SmartScan Stage 1 Error]: Gallery permission denied');
+        Alert.alert('Permission Needed', 'Please allow photo library access to select documents.');
+        speakText('Please allow photo library access to select documents.');
+        return;
+      }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      setIsSmartScanning(true);
+      setSmartScanError(null);
+      setSmartScanStatus('Selecting document...');
+
+      const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.8 });
+      if (res.canceled || !res.assets?.[0]?.uri) {
+        console.error('[SmartScan Stage 1]: User canceled image selection');
+        setIsSmartScanning(false);
+        setSmartScanStatus('');
+        return;
+      }
+
+      console.error('[SmartScan Stage 1]: Image Selected, width:', res.assets[0].width ?? 0, 'height:', res.assets[0].height ?? 0);
+
+      setSmartScanStatus('Understanding your document...');
+      speakText('Understanding your document with EverySense AI...');
+
+      console.error('[SmartScan Stage 2]: Converting Image to Base64 JPEG');
+      const manip = await ImageManipulator.manipulateAsync(
+        res.assets[0].uri,
+        [{ resize: { width: 900 } }],
+        { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+      );
+
+      console.error('[SmartScan Stage 2]: Base64 length:', manip.base64?.length ?? 0);
+
+      if (!manip.base64) {
+        console.error('[SmartScan Stage 2 Error]: Base64 encoding failed');
+        throw new Error('Could not encode document image.');
+      }
+
+      const resultData = await analyzeSmartScanDocument(manip.base64, 'image/jpeg');
+      // Ensure imageUri is only stored if it's a file URI (not base64 data URI)
+      const safeUri = res.assets[0].uri && !res.assets[0].uri.startsWith('data:') ? res.assets[0].uri : undefined;
+      const fullResult: SmartScanResult = {
+        ...resultData,
+        imageUri: safeUri,
+      };
+
+      console.error('[SmartScan Stage 6]: Displaying Result Card docType:', fullResult.documentType, 'title:', fullResult.title);
+      setSmartScanResult(fullResult);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      speakText(`Smart Scan complete! Detected ${fullResult.documentType}. ${fullResult.explanation}`);
+    } catch (err: any) {
+      const isAbort = err?.name === 'AbortError' || err?.message?.toLowerCase().includes('canceled') || err?.message?.toLowerCase().includes('timed out');
+      console.error('[SmartScan Flow Error]:', isAbort ? `[AbortError/Timeout] ${err?.message || 'Canceled'}` : (err?.message || String(err)));
+      const isNetwork = !isAbort && (err?.message?.toLowerCase().includes('network') || err?.message?.toLowerCase().includes('failed to fetch') || err?.message?.toLowerCase().includes('reach'));
+      const errorMessage = isNetwork
+        ? "EverySense couldn't reach the AI service. Check your connection and try again."
+        : "We couldn't understand this document. Try another image.";
+      setSmartScanError(errorMessage);
+      speakText(errorMessage);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      setIsSmartScanning(false);
+      setSmartScanStatus('');
+    }
+  };
+
+  const handleSmartScanReset = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSmartScanResult(null);
+    setSmartScanError(null);
+    setSmartScanStatus('');
+  };
+
+  const handleCreateSmartScanReminder = (res: SmartScanResult) => {
+    try {
+      console.error('[SmartScan Stage 7]: Create Reminder tapped for title:', res.title);
+
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      const prefillTitle = res.title !== 'Not detected' ? `Pay ${res.title}` : `Action required for ${res.documentType}`;
+      const prefillDesc = `${res.explanation}\nAmount: ${res.amount}\nDue Date: ${res.dueDate}`;
+
+      console.error('[SmartScan Stage 7]: Navigating to Reminders screen with prefillTitle:', prefillTitle);
+
+      speakText(`Opening reminders to create reminder for ${prefillTitle}`);
+      navigation.navigate('Reminders', {
+        prefillTitle,
+        prefillDescription: prefillDesc,
+        prefillDate: res.dueDate !== 'Not detected' ? res.dueDate : undefined,
+      });
+    } catch (err: any) {
+      console.error('[SmartScan Stage 7 Error]:', err?.message || String(err));
+    }
+  };
+
+  const handleWhatNextAction = async (action: WhatNextAction) => {
+    if (!smartScanResult) return;
+
+    try {
+      switch (action.type) {
+        case 'CREATE_REMINDER': {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          const prefillTitle = action.metadata?.prefillTitle || (smartScanResult.title !== 'Not detected' ? `Pay ${smartScanResult.title}` : `Action required for ${smartScanResult.documentType}`);
+          const prefillDesc = `${smartScanResult.explanation}\nAmount: ${smartScanResult.amount}\nDue Date: ${smartScanResult.dueDate}`;
+          const prefillDate = action.metadata?.suggestedDateIso || (smartScanResult.dueDate !== 'Not detected' ? smartScanResult.dueDate : undefined);
+
+          speakText(`Opening reminders to set reminder for ${prefillTitle}`);
+          navigation.navigate('Reminders', {
+            prefillTitle,
+            prefillDescription: prefillDesc,
+            prefillDate,
+          });
+          break;
+        }
+
+        case 'EXPLAIN': {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          const explainText = smartScanResult.explanation || `This is a ${smartScanResult.documentType} titled ${smartScanResult.title}. Amount: ${smartScanResult.amount}, Due: ${smartScanResult.dueDate}.`;
+          speakText(explainText);
+          Alert.alert(
+            action.title,
+            explainText,
+            [{ text: 'OK', style: 'default' }]
+          );
+          break;
+        }
+
+        case 'CHAT': {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+          const docTitle = smartScanResult.title !== 'Not detected' ? smartScanResult.title : smartScanResult.documentType;
+          const docContext = [
+            `Document: ${docTitle}`,
+            `Type: ${smartScanResult.documentType}`,
+            smartScanResult.amount !== 'Not detected' ? `Amount: ${smartScanResult.amount}` : null,
+            smartScanResult.dueDate !== 'Not detected' ? `Due: ${smartScanResult.dueDate}` : null,
+            smartScanResult.keyDates !== 'Not detected' ? `Key Dates: ${smartScanResult.keyDates}` : null,
+            smartScanResult.importantInfo !== 'Not detected' ? `Details: ${smartScanResult.importantInfo}` : null,
+            `Summary: ${smartScanResult.explanation}`,
+          ].filter(Boolean).join('\n');
+
+          speakText(`Opening assistant for ${docTitle}`);
+          navigation.navigate('Assistant', {
+            documentContext: docContext,
+            documentTitle: docTitle,
+          });
+          break;
+        }
+
+        case 'SAVE': {
+          const res = await saveDocument(smartScanResult);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          const docTitle = smartScanResult.title !== 'Not detected' ? smartScanResult.title : smartScanResult.documentType;
+          const msg = res.alreadySaved
+            ? `${docTitle} is already in your saved documents.`
+            : `${docTitle} has been saved for later reference.`;
+          speakText(msg);
+          Alert.alert('Document Saved', msg, [{ text: 'OK' }]);
+          break;
+        }
+      }
+    } catch (err: any) {
+      console.error('[WhatNext Action Error]:', err);
+    }
+  };
+
+  const handleExecuteVoiceIntent = (result: ParsedIntentResult) => {
+    switch (result.intent) {
+      case 'CREATE_REMINDER':
+        console.log('🗣️ [HomeScreen Navigation Log]:');
+        console.log('   - Raw transcript:', result.rawText);
+        console.log('   - Parsed title:', result.title);
+        console.log('   - Final navigation prefillDate:', result.date);
+        navigation.navigate('Reminders', {
+          prefillTitle: result.title || 'New Reminder',
+          prefillDescription: result.description || result.title || 'Created via Voice Command',
+          prefillDate: result.date,
+        });
+        break;
+      case 'SCAN':
+        console.error('[VoiceCommand Intent SCAN]: Triggering Smart Scan');
+        handleSmartScanCamera();
+        break;
+      case 'EXPLAIN':
+        console.error('[VoiceCommand Intent EXPLAIN]: SmartScan result available =', !!smartScanResult);
+        if (smartScanResult) {
+          speakText(`I'll explain the document in simple words: ${smartScanResult.explanation}`);
+        } else {
+          speakText("Please scan a document first and I'll explain it simply.");
+        }
+        break;
+      case 'HELP':
+        console.error('[VoiceCommand Intent HELP]');
+        break;
+    }
+  };
 
   const theme = useMemo(() => getThemeConfig(state.accessibilitySettings.isDarkMode), [state.accessibilitySettings.isDarkMode]);
   const styles = useMemo(() => createStyles(theme), [theme]);
@@ -145,13 +448,19 @@ const HomeScreen = () => {
 
     voiceManager.addCommand({
       keywords: ['add reminder', 'create reminder', 'set reminder', 'remind me to', 'new reminder'],
-      action: () => {
+      action: async (fullTranscript) => {
         setIsListening(false);
-        navigation.navigate('Reminders');
-        speakText('Opening reminders to add a new one. You can say the reminder details naturally.');
+        if (fullTranscript) {
+          const res = await parseUserVoiceIntent(fullTranscript);
+          handleExecuteVoiceIntent(res);
+        } else {
+          navigation.navigate('Reminders');
+          speakText('Opening reminders to add a new one. You can say the reminder details naturally.');
+        }
       },
       description: 'Create a new reminder',
-      category: 'reminder'
+      category: 'reminder',
+      captureFullTranscript: true,
     });
 
     voiceManager.addCommand({
@@ -232,21 +541,17 @@ const HomeScreen = () => {
       return;
     }
     if (!state.voiceAnnouncementsEnabled) return;
-    try { Speech.stop(); } catch {}
-    try {
-      const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
-      Speech.speak(text, {
-        rate: safeRate,
-        pitch: 1.0,
-      });
-    } catch {}
+    const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
+    ttsSpeakText(text, {
+      rate: safeRate,
+      pitch: 1.0,
+    });
   };
 
   // Helper for direct Speech.speak calls (respects voice announcements setting)
   const speakDirect = (text: string, options?: any) => {
     if (!state.voiceAnnouncementsEnabled) return;
-    try { Speech.stop(); } catch {}
-    Speech.speak(text, options || { language: 'en-US', rate: 1.0 });
+    ttsSpeakText(text, options || { language: 'en-US', rate: 1.0 });
   };
 
   const handleVoiceInput = async () => {
@@ -280,7 +585,7 @@ const HomeScreen = () => {
         const isFinal = event.isFinal;
         
         if (transcript && isFinal) {
-          setTtsText(prev => prev ? `${prev} ${transcript}` : transcript);
+          setTtsText((prev: string) => prev ? `${prev} ${transcript}` : transcript);
           setIsVoiceInputMode(false);
           subscription.remove();
         }
@@ -538,7 +843,7 @@ const HomeScreen = () => {
    * Stop reading
    */
   const handleStopReading = () => {
-    Speech.stop();
+    ttsStopSpeaking();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
@@ -653,9 +958,9 @@ const HomeScreen = () => {
     { text: 'The power of the web is in its universality.', author: 'Tim Berners-Lee' },
     { text: 'Design for the extremes and everyone benefits.', author: 'Unknown' },
     { text: 'Inclusion is not bringing people into what already exists.', author: 'Dei Tomlinson' },
-    { text: 'Small steps every day lead to big changes.', author: 'AccessAid' },
-    { text: 'Technology should improve life for everyone.', author: 'AccessAid' },
-    { text: 'Your needs are valid. Your voice matters.', author: 'AccessAid' },
+    { text: 'Small steps every day lead to big changes.', author: 'EverySense' },
+    { text: 'Technology should improve life for everyone.', author: 'EverySense' },
+    { text: 'Your needs are valid. Your voice matters.', author: 'EverySense' },
   ];
 
   const greeting = getGreeting();
@@ -669,266 +974,200 @@ const HomeScreen = () => {
           contentContainerStyle={styles.scrollContainer}
           showsVerticalScrollIndicator={false}
         >
-          <Animated.View style={[styles.header, { opacity: fadeAnim }]}>
-            <View style={styles.logoContainer}>
-              <AccessAidLogo size={70} showText={true} />
-            </View>
-            <Text style={styles.greetingText}>
-              {greeting.emoji} {greeting.text}, {state.user?.name || 'there'}!
-            </Text>
-            <Text style={styles.subtitleText}>
-              Choose an accessibility feature below
-            </Text>
-            {streakCount > 0 && (
-              <View style={styles.streakBadge} accessibilityLabel={`${streakCount} day check-in streak`}>
-                <Text style={styles.streakBadgeText}>🔥 {streakCount}-day streak</Text>
+          {/* ── 1. Top Brand Treatment ── */}
+          <Animated.View style={[styles.brandHeader, { opacity: fadeAnim }]}>
+            <View style={styles.brandRow}>
+              <EverySenseLogo size={34} showText={false} />
+              <View style={styles.brandTitleWrap}>
+                <Text style={[styles.brandKicker, { color: theme.accent }]}>EVERYSENSE</Text>
+                <Text style={[styles.brandTagline, { color: theme.textMuted }]}>Understand. Decide. Act.</Text>
               </View>
-            )}
+            </View>
           </Animated.View>
 
-          {/* Daily Quote */}
-          <View style={[styles.quoteCard, { backgroundColor: theme.cardBackground }]}>
-            <View style={styles.quoteTopRow}>
-              <Text style={styles.quoteDecor}>"</Text>
-              <View style={[styles.quoteBadge, { backgroundColor: theme.isDark ? 'rgba(79,70,229,0.2)' : '#EEF2FF' }]}>
-                <Text style={[styles.quoteBadgeText, { color: '#4F46E5' }]}>Daily Quote</Text>
-              </View>
-            </View>
-            <Text style={[styles.quoteText, { color: theme.textPrimary }]}>{quote.text}</Text>
-            <Text style={[styles.quoteAuthor, { color: theme.textSecondary }]}>— {quote.author}</Text>
+          {/* ── 2. Hero Section ── */}
+          <View style={styles.heroSection}>
+            <Text style={[styles.heroHeading, { color: theme.textPrimary }]}>
+              Understand what matters.
+            </Text>
+            <Text style={[styles.heroSubtext, { color: theme.textSecondary }]}>
+              Scan something, understand it, and know what to do next.
+            </Text>
           </View>
 
-          <ModernCard variant="elevated" style={styles.ttsContainer}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Text-to-Speech</Text>
-              <ModernButton
-                title={isVoiceInputMode ? 'Stop Input' : 'Voice Input'}
-                onPress={handleVoiceInput}
-                variant={isVoiceInputMode ? 'danger' : 'outline'}
-                size="small"
-                icon={<Ionicons name={isVoiceInputMode ? "mic" : "mic-outline"} size={16} color={isVoiceInputMode ? theme.danger : theme.accent} />}
-                style={styles.voiceInputButton}
-              />
-            </View>
-            
-            <View style={styles.inputContainer}>
-              <TextInput
-                style={[
-                  styles.textInput,
-                  { fontSize: 16 * (state.accessibilitySettings.textZoom / 100) }
-                ]}
-                value={ttsText}
-                onChangeText={setTtsText}
-                placeholder="Type or speak your text here..."
-                placeholderTextColor={placeholderColor}
-                multiline
-                numberOfLines={4}
-                textAlignVertical="top"
-                accessibilityLabel="Text input for speech"
-                accessibilityHint="Enter text that you want the app to read aloud"
-              />
-            </View>
-            
-            <ModernButton
-              title="Read Aloud"
-              onPress={() => speakText(ttsText)}
-              variant="primary"
-              size="large"
-              icon={<Ionicons name="volume-high" size={20} color="white" />}
-              style={styles.speakButton}
-            />
-          </ModernCard>
-
-          {/* AI Reader Section */}
-          <View style={styles.aiReaderContainer}>
-            {/* Header */}
-            <LinearGradient
-              colors={['#4F46E5', '#818CF8']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.aiReaderHeader}
+          {/* ── 3. Primary Actions (Scan & Gallery) ── */}
+          <View style={styles.primaryScanActionsRow}>
+            <TouchableOpacity
+              style={[styles.scanActionBtnPrimary, { backgroundColor: theme.accent }]}
+              onPress={handleSmartScanCamera}
+              disabled={isSmartScanning}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Scan document with camera"
             >
-              <View style={styles.aiReaderHeaderIcon}>
-                <Ionicons name="scan" size={22} color="#fff" />
-              </View>
-              <View style={styles.aiReaderHeaderText}>
-                <Text style={styles.aiReaderTitle}>AI Camera Reader</Text>
-                <Text style={styles.aiReaderSubtitle}>AccessAid</Text>
-              </View>
-              <View style={styles.aiReaderBadgePill}>
-                <Text style={styles.aiReaderBadgeText}>AI</Text>
-              </View>
-            </LinearGradient>
+              <Ionicons name="camera-outline" size={22} color="#0B1020" style={{ marginRight: 8 }} />
+              <Text style={styles.scanActionPrimaryText}>Scan document</Text>
+            </TouchableOpacity>
 
-            {/* Action Buttons */}
-            <View style={styles.aiReaderBody}>
-              {/* Camera button — full width */}
-              <TouchableOpacity
-                style={[styles.cameraPrimaryBtn, isProcessing && styles.btnDisabled]}
-                onPress={handleTakePicture}
-                disabled={isProcessing}
-                accessibilityLabel="Take a picture to extract text"
-              >
-                <LinearGradient
-                  colors={isProcessing ? ['#9CA3AF', '#9CA3AF'] : ['#4F46E5', '#818CF8']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.cameraPrimaryBtnInner}
-                >
-                  <Ionicons name="camera" size={22} color="#fff" />
-                  <Text style={styles.cameraPrimaryBtnText}>Take a Picture</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.scanActionBtnSecondary, { borderColor: theme.cardBorder, backgroundColor: theme.surfaceSecondary }]}
+              onPress={handleSmartScanGallery}
+              disabled={isSmartScanning}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel="Choose document from gallery"
+            >
+              <Ionicons name="image-outline" size={20} color={theme.accent} style={{ marginRight: 8 }} />
+              <Text style={[styles.scanActionSecondaryText, { color: theme.textPrimary }]}>Choose from gallery</Text>
+            </TouchableOpacity>
+          </View>
 
-              {/* Secondary row */}
-              <View style={styles.aiReaderSecondRow}>
-                <TouchableOpacity
-                  style={[styles.cameraSecondaryBtn, { borderColor: '#4F46E5' }, isProcessing && styles.btnDisabled]}
-                  onPress={handleUploadImage}
-                  disabled={isProcessing}
-                  accessibilityLabel="Upload an image to extract text"
-                >
-                  <Ionicons name="image-outline" size={20} color="#4F46E5" />
-                  <Text style={[styles.cameraSecondaryBtnText, { color: '#4F46E5' }]}>Gallery</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.cameraSecondaryBtn, { borderColor: '#7C3AED' }, isProcessing && styles.btnDisabled]}
-                  onPress={handleUploadFile}
-                  disabled={isProcessing}
-                  accessibilityLabel="Upload a file to extract text"
-                >
-                  <Ionicons name="document-text-outline" size={20} color="#7C3AED" />
-                  <Text style={[styles.cameraSecondaryBtnText, { color: '#7C3AED' }]}>File</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Processing state */}
-              {isProcessing && (
-                <View style={styles.processingContainer}>
-                  <ActivityIndicator size="large" color="#4F46E5" />
-                  <Text style={styles.processingTitle}>Analyzing with AI...</Text>
-                  <Text style={styles.processingSubText}>Groq Vision is reading your image</Text>
-                </View>
-              )}
-
-              {/* Result area */}
-              {aiReaderText ? (
-                <View style={styles.resultContainer}>
-                  {/* Result header */}
-                  <View style={styles.resultHeader}>
-                    <View style={styles.resultHeaderLeft}>
-                      <View style={styles.resultDot} />
-                      <Text style={styles.resultTitle}>Extracted Text</Text>
-                    </View>
-                    <View style={styles.resultHeaderActions}>
-                      <TouchableOpacity
-                        style={styles.resultIconBtn}
-                        onPress={handleReadAgain}
-                        accessibilityLabel="Read text again"
-                      >
-                        <Ionicons name="volume-high-outline" size={18} color="#4F46E5" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.resultIconBtn, { marginLeft: 8 }]}
-                        onPress={handleStopReading}
-                        accessibilityLabel="Stop reading"
-                      >
-                        <Ionicons name="stop-circle-outline" size={18} color="#EF4444" />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-
-                  {/* Text content */}
-                  <ScrollView
-                    style={styles.resultScroll}
-                    contentContainerStyle={styles.resultScrollContent}
-                    showsVerticalScrollIndicator={false}
-                  >
-                    <Text
-                      style={[styles.resultText, { fontSize: 15 * (state.accessibilitySettings.textZoom / 100) }]}
-                      accessibilityLabel="Extracted text"
-                      accessibilityRole="text"
-                    >
-                      {aiReaderText}
-                    </Text>
-                  </ScrollView>
-
-                  {/* Footer actions */}
-                  <View style={styles.resultActions}>
-                    <TouchableOpacity
-                      style={styles.resultActionOutline}
-                      onPress={handleCopyText}
-                      accessibilityLabel="Copy text"
-                    >
-                      <Ionicons name="copy-outline" size={16} color="#4F46E5" />
-                      <Text style={[styles.resultActionText, { color: '#4F46E5' }]}>Copy</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.resultActionFilled}
-                      onPress={handleSaveAsReminder}
-                      accessibilityLabel="Save as reminder"
-                    >
-                      <Ionicons name="bookmark-outline" size={16} color="#fff" />
-                      <Text style={[styles.resultActionText, { color: '#fff' }]}>Save as Reminder</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ) : null}
+          {/* ── Scanning Progress Banner ── */}
+          {isSmartScanning && (
+            <View style={[styles.scanningBanner, { backgroundColor: theme.surfaceSecondary, borderColor: theme.cardBorder }]}>
+              <ActivityIndicator size="small" color={theme.accent} style={{ marginRight: 12 }} />
+              <Text style={[styles.scanningBannerText, { color: theme.textPrimary }]}>
+                {smartScanStatus || 'One moment...'}
+              </Text>
             </View>
-          </View>
+          )}
 
-          <View style={styles.featuresContainer}>
-            <FeatureCard
-              title={isListening ? "Voice Commands (Active)" : "Voice Commands"}
-              description={isListening ? "Listening for commands..." : "Control the app with your voice"}
-              icon="mic"
-              onPress={() => {
-                if (isListening) {
-                  setIsListening(false);
-                  voiceManager.stopListening();
-                } else {
-                  if (!ExpoSpeechRecognitionModule && Platform.OS !== 'web') {
-                    Alert.alert(
-                      'Feature Not Available',
-                      'Voice commands require a development build.\n\nnpx expo run:android\n\nNot available in Expo Go.'
-                    );
-                    return;
-                  }
-                  setIsListening(true);
-                  voiceManager.startListening(() => setIsListening(false));
-                }
-              }}
-              gradientColors={isListening ? ['#4CAF50', '#45a049'] : ['#FF6B6B', '#E53E3E']}
-              accessibilityLabel="Voice Commands feature"
-            />
-            <FeatureCard
-              title="Accessible Places"
-              description="Find wheelchair-friendly spots near you"
-              icon="location"
-              onPress={() => navigationRef.current?.navigate('AccessiblePlaces')}
-              gradientColors={['#7C3AED', '#A855F7']}
-              accessibilityLabel="Find accessible places near you"
-            />
-            <FeatureCard
-              title="Camera Guide"
-              description="Point camera to describe obstacles & safe paths"
-              icon="scan"
-              onPress={() => navigationRef.current?.navigate('CameraGuide')}
-              gradientColors={['#0ea5e9', '#6366f1']}
-              accessibilityLabel="AI camera guide for accessibility"
-            />
-          </View>
+          {/* ── Scanning Error Banner ── */}
+          {smartScanError && (
+            <View style={[styles.scanErrorBox, { borderColor: theme.danger, backgroundColor: theme.surfaceSecondary }]}>
+              <Ionicons name="alert-circle-outline" size={20} color={theme.danger} style={{ marginRight: 10 }} />
+              <Text style={[styles.scanErrorText, { color: theme.textPrimary }]}>{smartScanError}</Text>
+              <TouchableOpacity onPress={handleSmartScanReset} style={styles.retryBtn}>
+                <Text style={[styles.retryText, { color: theme.accent }]}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
-          <QuickStatsCard
-            title="Quick Stats"
-            stats={[
-              { value: `${Math.round(state.accessibilitySettings.brightness)}%`, label: 'Brightness' },
-              { value: `${Math.round(state.accessibilitySettings.textZoom)}%`, label: 'Text Size' },
-              { value: `${state.accessibilitySettings.voiceSpeed.toFixed(1)}x`, label: 'Voice Speed' },
-              { value: `${state.reminders.filter(r => !r.isCompleted).length}`, label: 'Reminders' },
-            ]}
+          {/* ── 4. WHAT'S NEXT? Centerpiece ── */}
+          {smartScanResult ? (
+            <>
+              <SmartScanUnderstandingCard
+                result={smartScanResult}
+                theme={theme}
+                onReset={handleSmartScanReset}
+                onCreateReminder={handleCreateSmartScanReminder}
+              />
+              <WhatNextCard
+                result={smartScanResult}
+                theme={theme}
+                onAction={handleWhatNextAction}
+              />
+            </>
+          ) : (
+            <View style={[styles.allCaughtUpCard, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
+              <View style={styles.allCaughtUpHeader}>
+                <View style={[styles.allCaughtUpIconCircle, { backgroundColor: theme.accentSoft }]}>
+                  <Ionicons name="shield-checkmark-outline" size={20} color={theme.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.allCaughtUpKicker, { color: theme.accent }]}>WHAT'S NEXT?</Text>
+                  <Text style={[styles.allCaughtUpHeading, { color: theme.textPrimary }]}>You’re all caught up.</Text>
+                </View>
+              </View>
+              <Text style={[styles.allCaughtUpBody, { color: theme.textSecondary }]}>
+                Scan a bill, prescription, notice, or document above to see your recommended next steps and reminders.
+              </Text>
+            </View>
+          )}
+
+          {/* ── 5. Natural Voice Assistant ── */}
+          <VoiceCommandCard
+            theme={theme}
+            onExecuteIntent={handleExecuteVoiceIntent}
+            speakText={speakText}
+            isSmartScanAvailable={!!smartScanResult}
           />
+
+          {/* ── 6. Read Aloud (Accessibility) ── */}
+          <View style={[styles.ttsCard, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}>
+            <View style={styles.ttsHeader}>
+              <View style={[styles.ttsIconWrap, { backgroundColor: theme.accentSoft }]}>
+                <Ionicons name="volume-high-outline" size={18} color={theme.accent} />
+              </View>
+              <Text style={[styles.ttsTitle, { color: theme.textPrimary }]}>READ ALOUD</Text>
+            </View>
+
+            <TextInput
+              style={[
+                styles.ttsInput,
+                {
+                  backgroundColor: theme.surfaceSecondary,
+                  borderColor: theme.cardBorder,
+                  color: theme.textPrimary,
+                  fontSize: 15 * (state.accessibilitySettings.textZoom / 100),
+                },
+              ]}
+              value={ttsText}
+              onChangeText={setTtsText}
+              placeholder="Type or paste any text to read aloud..."
+              placeholderTextColor={placeholderColor}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              accessibilityLabel="Text input for read aloud"
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.readAloudBtn,
+                {
+                  backgroundColor: isReadingAloud ? theme.surfaceSecondary : theme.accent,
+                  borderColor: theme.accent,
+                },
+              ]}
+              onPress={handleReadAloudPress}
+              accessibilityRole="button"
+              accessibilityLabel={isReadingAloud ? "Stop reading" : "Read text aloud"}
+            >
+              <Ionicons
+                name={isReadingAloud ? "volume-mute" : "volume-high"}
+                size={20}
+                color={isReadingAloud ? theme.accent : "#0B1020"}
+                style={{ marginRight: 8 }}
+              />
+              <Text style={[styles.readAloudBtnText, { color: isReadingAloud ? theme.accent : "#0B1020" }]}>
+                {isReadingAloud ? "Reading..." : "READ ALOUD"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ── 7. Quick Navigation Shortcuts ── */}
+          <View style={styles.shortcutsRow}>
+            <TouchableOpacity
+              style={[styles.shortcutItem, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}
+              onPress={() => navigation.navigate('Reminders')}
+              accessibilityRole="button"
+              accessibilityLabel="Reminders"
+            >
+              <Ionicons name="alarm-outline" size={20} color={theme.accent} />
+              <Text style={[styles.shortcutText, { color: theme.textPrimary }]}>Reminders</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.shortcutItem, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}
+              onPress={() => navigation.navigate('CheckIn')}
+              accessibilityRole="button"
+              accessibilityLabel="Check In"
+            >
+              <Ionicons name="heart-outline" size={20} color={theme.accent} />
+              <Text style={[styles.shortcutText, { color: theme.textPrimary }]}>Check In</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.shortcutItem, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}
+              onPress={() => navigation.navigate('Assistant')}
+              accessibilityRole="button"
+              accessibilityLabel="AI Assistant"
+            >
+              <Ionicons name="chatbubble-ellipses-outline" size={20} color={theme.accent} />
+              <Text style={[styles.shortcutText, { color: theme.textPrimary }]}>Assistant</Text>
+            </TouchableOpacity>
+          </View>
 
 
         </ScrollView>
@@ -985,6 +1224,40 @@ const createStyles = (theme: AppTheme) =>
       textShadowOffset: { width: 0, height: 2 },
       textShadowRadius: 5,
       paddingHorizontal: isSmallScreen ? 10 : 0,
+    },
+    taglineBadge: {
+      paddingHorizontal: 14,
+      paddingVertical: 5,
+      borderRadius: 16,
+      backgroundColor: theme.isDark ? 'rgba(99, 102, 241, 0.22)' : 'rgba(255, 255, 255, 0.22)',
+      borderWidth: 1,
+      borderColor: theme.isDark ? 'rgba(99, 102, 241, 0.45)' : 'rgba(255, 255, 255, 0.45)',
+      marginTop: 6,
+      marginBottom: 6,
+    },
+    taglineBadgeText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: theme.isDark ? '#C7D2FE' : '#FFFFFF',
+      letterSpacing: 0.9,
+      textTransform: 'uppercase',
+    },
+    heroTitle: {
+      fontSize: isSmallScreen ? 20 : 23,
+      fontWeight: '800',
+      color: theme.textInverted,
+      textAlign: 'center',
+      marginTop: 4,
+      letterSpacing: 0.2,
+    },
+    heroSubtitle: {
+      fontSize: isSmallScreen ? 13 : 14,
+      fontWeight: '500',
+      color: 'rgba(255, 255, 255, 0.88)',
+      textAlign: 'center',
+      marginTop: 4,
+      paddingHorizontal: 16,
+      lineHeight: 20,
     },
     quoteCard: {
       borderRadius: 20,
@@ -1439,6 +1712,375 @@ const createStyles = (theme: AppTheme) =>
       color: theme.textSecondary,
       marginTop: 4,
       lineHeight: 20,
+    },
+    // ── Smart Scan styles ──
+    smartScanHeroContainer: {
+      marginBottom: 20,
+      borderRadius: 20,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: theme.cardBorder,
+      shadowColor: '#10B981',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.15,
+      shadowRadius: 10,
+      elevation: 5,
+    },
+    smartScanHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    smartScanHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      flex: 1,
+    },
+    smartScanIconCircle: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(255, 255, 255, 0.2)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    smartScanHeaderText: {
+      flex: 1,
+    },
+    smartScanTitle: {
+      fontSize: 18,
+      fontWeight: '800',
+      color: '#FFFFFF',
+    },
+    smartScanSubtitle: {
+      fontSize: 12,
+      color: 'rgba(255, 255, 255, 0.85)',
+      marginTop: 2,
+    },
+    smartScanBadgePill: {
+      backgroundColor: 'rgba(255, 255, 255, 0.25)',
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 12,
+    },
+    smartScanBadgeText: {
+      color: '#FFFFFF',
+      fontSize: 11,
+      fontWeight: '700',
+    },
+    smartScanBody: {
+      padding: 16,
+    },
+    smartScanDocPillHeader: {
+      fontSize: 11,
+      fontWeight: '600',
+      textTransform: 'uppercase',
+      marginBottom: 8,
+    },
+    smartScanPillsScroll: {
+      gap: 8,
+      marginBottom: 16,
+    },
+    smartScanPill: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 16,
+    },
+    smartScanPillText: {
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    smartScanBtnRow: {
+      flexDirection: 'row',
+      gap: 10,
+    },
+    smartScanPrimaryBtn: {
+      flex: 1,
+      borderRadius: 14,
+      overflow: 'hidden',
+    },
+    smartScanBtnGradient: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingVertical: 14,
+    },
+    smartScanBtnText: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    smartScanSecondaryBtn: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingVertical: 14,
+      borderRadius: 14,
+      borderWidth: 1.5,
+      backgroundColor: 'transparent',
+    },
+    smartScanSecondaryBtnText: {
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    smartScanLoadingBox: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 20,
+      gap: 8,
+    },
+    smartScanLoadingTitle: {
+      fontSize: 15,
+      fontWeight: '700',
+    },
+    smartScanLoadingSub: {
+      fontSize: 12,
+    },
+    smartScanErrorCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+      borderWidth: 1,
+      borderColor: '#EF4444',
+      padding: 12,
+      borderRadius: 14,
+      marginTop: 12,
+    },
+    smartScanErrorTitle: {
+      color: '#EF4444',
+      fontWeight: '700',
+      fontSize: 14,
+    },
+    smartScanErrorText: {
+      color: '#EF4444',
+      fontSize: 12,
+      marginTop: 2,
+    },
+    smartScanRetryBtn: {
+      backgroundColor: '#EF4444',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
+    smartScanRetryBtnText: {
+      color: '#FFFFFF',
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    // ── Royal EverySense Overhaul Styles ──
+    brandHeader: {
+      paddingTop: 8,
+      paddingBottom: 4,
+    },
+    brandRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    brandTitleWrap: {
+      marginLeft: 10,
+    },
+    brandKicker: {
+      fontSize: 13,
+      fontWeight: '800',
+      letterSpacing: 1.5,
+    },
+    brandTagline: {
+      fontSize: 11,
+      fontWeight: '500',
+      marginTop: 1,
+    },
+    heroSection: {
+      marginVertical: 18,
+    },
+    heroHeading: {
+      fontSize: 26,
+      fontWeight: '700',
+      letterSpacing: -0.4,
+      marginBottom: 6,
+    },
+    heroSubtext: {
+      fontSize: 14,
+      lineHeight: 21,
+      fontWeight: '400',
+    },
+    primaryScanActionsRow: {
+      flexDirection: 'row',
+      gap: 12,
+      marginBottom: 16,
+    },
+    scanActionBtnPrimary: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 48,
+      borderRadius: 16,
+      paddingHorizontal: 14,
+      paddingVertical: 14,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.25,
+      shadowRadius: 4,
+      elevation: 3,
+    },
+    scanActionPrimaryText: {
+      color: '#0B1020',
+      fontSize: 14,
+      fontWeight: '700',
+    },
+    scanActionBtnSecondary: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 48,
+      borderRadius: 16,
+      paddingHorizontal: 12,
+      paddingVertical: 14,
+      borderWidth: 1,
+    },
+    scanActionSecondaryText: {
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    scanningBanner: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      marginBottom: 16,
+    },
+    scanningBannerText: {
+      fontSize: 14,
+      fontWeight: '500',
+    },
+    scanErrorBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 14,
+      borderRadius: 14,
+      borderWidth: 1,
+      marginBottom: 16,
+    },
+    scanErrorText: {
+      flex: 1,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+    retryBtn: {
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 8,
+    },
+    retryText: {
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    allCaughtUpCard: {
+      padding: 20,
+      borderRadius: 18,
+      borderWidth: 1,
+      marginBottom: 20,
+    },
+    allCaughtUpHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 10,
+    },
+    allCaughtUpIconCircle: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    allCaughtUpKicker: {
+      fontSize: 11,
+      fontWeight: '800',
+      letterSpacing: 1.2,
+    },
+    allCaughtUpHeading: {
+      fontSize: 17,
+      fontWeight: '700',
+      marginTop: 2,
+    },
+    allCaughtUpBody: {
+      fontSize: 14,
+      lineHeight: 20,
+    },
+    ttsCard: {
+      padding: 18,
+      borderRadius: 18,
+      borderWidth: 1,
+      marginBottom: 20,
+    },
+    ttsHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 12,
+    },
+    ttsIconWrap: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    ttsTitle: {
+      fontSize: 12,
+      fontWeight: '800',
+      letterSpacing: 1.2,
+    },
+    ttsInput: {
+      borderWidth: 1,
+      borderRadius: 14,
+      padding: 12,
+      minHeight: 80,
+      marginBottom: 14,
+    },
+    readAloudBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 48,
+      borderRadius: 14,
+      borderWidth: 1,
+      paddingVertical: 12,
+    },
+    readAloudBtnText: {
+      fontSize: 13,
+      fontWeight: '700',
+      letterSpacing: 0.8,
+    },
+    shortcutsRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginBottom: 24,
+    },
+    shortcutItem: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      minHeight: 46,
+      paddingVertical: 12,
+      borderRadius: 14,
+      borderWidth: 1,
+    },
+    shortcutText: {
+      fontSize: 13,
+      fontWeight: '600',
     },
   });
 

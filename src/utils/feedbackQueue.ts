@@ -7,7 +7,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../lib/supabase';
 
-const QUEUE_KEY = 'accessaid_feedback_queue_v1';
+const QUEUE_KEY = 'everysense_feedback_queue_v1';
 
 export type FeedbackOp =
   | { type: 'feedback'; data: AccessibilityFeedbackData }

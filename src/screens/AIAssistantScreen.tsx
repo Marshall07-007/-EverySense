@@ -10,7 +10,8 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
-import { AccessAidLogo } from '../components/AccessAidLogo';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
+import { EverySenseLogo } from '../components/EverySenseLogo';
 import { BackgroundLogo } from '../components/BackgroundLogo';
 
 // Conditional import — not available in Expo Go
@@ -41,11 +42,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { getThemeConfig } from '../../constants/theme';
 import { useApp } from '../contexts/AppContext';
 import { ChatMessage, sendChatMessage, sendImageMessage } from '../services/geminiService';
 import { voiceManager } from '../utils/voiceCommandManager';
 import { supabase } from '../../lib/supabase';
+import { MainTabParamList } from '../types';
 
 // Clipboard — conditional (not available in all environments)
 let Clipboard: any = null;
@@ -96,7 +99,7 @@ const TypingDots = ({ color }: { color: string }) => {
           />
         ))}
       </View>
-      <Text style={[dotStyles.label, { color }]}>AccessAid AI is thinking…</Text>
+      <Text style={[dotStyles.label, { color }]}>One moment…</Text>
     </View>
   );
 };
@@ -136,17 +139,16 @@ const MessageBubble = React.memo(({ message, accent, bg, textPrimary, textMuted,
   const handleToggleSpeak = () => {
     if (playing) {
       // ── Mute: stop speech ──
-      try { Speech.stop(); } catch {}
+      ttsStopSpeaking();
       setPlaying(false);
     } else {
       // ── Speak: start speech ──
-      try { Speech.stop(); } catch {}   // stop anything else playing
       setPlaying(true);
-      Speech.speak(message.text, {
-        rate:      voiceSpeed,
-        onDone:    () => setPlaying(false),
+      ttsSpeakText(message.text, {
+        rate: voiceSpeed,
+        onDone: () => setPlaying(false),
         onStopped: () => setPlaying(false),
-        onError:   () => setPlaying(false),
+        onError: () => setPlaying(false),
       });
     }
   };
@@ -165,7 +167,7 @@ const MessageBubble = React.memo(({ message, accent, bg, textPrimary, textMuted,
             {message.imageUri && (
               <Image source={{ uri: message.imageUri }} style={bStyles.image} resizeMode="cover" />
             )}
-            <Text style={[bStyles.userText, { fontSize }]}>{message.text}</Text>
+            <Text style={[bStyles.userText, { fontSize, color: '#0B1020' }]}>{message.text}</Text>
           </TouchableOpacity>
           {message.timestamp && (
             <Text style={[bStyles.timestamp, { color: textMuted, textAlign: 'right' }]}>{formatTime(message.timestamp)}</Text>
@@ -177,16 +179,16 @@ const MessageBubble = React.memo(({ message, accent, bg, textPrimary, textMuted,
 
   return (
     <View style={bStyles.aiRow}>
-      <View style={[bStyles.aiAvatar, { backgroundColor: accent + '22', borderColor: accent + '44', borderWidth: 1 }]}>
-        <Text style={{ fontSize: 14 }}>✦</Text>
+      <View style={[bStyles.aiAvatar, { backgroundColor: 'rgba(214, 179, 106, 0.12)', borderColor: 'rgba(214, 179, 106, 0.28)', borderWidth: 1 }]}>
+        <Ionicons name="chatbubble-ellipses-outline" size={15} color={accent} />
       </View>
       <View style={{ flex: 1 }}>
         <TouchableOpacity
           activeOpacity={0.85}
           onLongPress={handleCopy}
           delayLongPress={400}
-          style={[bStyles.aiBubble, { backgroundColor: isDark ? 'rgba(30,36,51,0.85)' : 'rgba(255,255,255,0.85)', borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)' }]}
-          accessibilityLabel={`AI response: ${message.text}. Long press to copy.`}
+          style={[bStyles.aiBubble, { backgroundColor: isDark ? '#151D32' : 'rgba(255,255,255,0.92)', borderColor: isDark ? 'rgba(214, 179, 106, 0.16)' : 'rgba(0,0,0,0.08)' }]}
+          accessibilityLabel={`Assistant response: ${message.text}. Long press to copy.`}
         >
           <Text style={[bStyles.aiText, { color: textPrimary, fontSize }]}>{message.text}</Text>
         </TouchableOpacity>
@@ -206,11 +208,11 @@ const MessageBubble = React.memo(({ message, accent, bg, textPrimary, textMuted,
           >
             <Ionicons
               name={playing ? 'volume-mute' : 'volume-high'}
-              size={22}
+              size={18}
               color={playing ? '#ef4444' : accent}
             />
             <Text style={[bStyles.speakLabel, { color: playing ? '#ef4444' : accent }]}>
-              {playing ? 'Mute' : 'Speak'}
+              {playing ? 'Stop' : 'Read aloud'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -250,24 +252,25 @@ interface WelcomeProps {
 
 const WelcomeView = ({ accent, textPrimary, textMuted, isDark, onPrompt }: WelcomeProps) => (
   <View style={wStyles.container}>
-    <View style={[wStyles.logo, { backgroundColor: accent + '18', borderColor: accent + '33', borderWidth: 1 }]}>
-      <Text style={{ fontSize: 32 }}>✦</Text>
+    <View style={wStyles.logoWrap}>
+      <EverySenseLogo size={46} showText={false} />
     </View>
-    <Text style={[wStyles.title, { color: '#fff' }]}>AccessAid AI</Text>
-    <Text style={[wStyles.subtitle, { color: 'rgba(255,255,255,0.75)' }]}>
-      Ask me anything about your health,{'\n'}medications, or accessibility.
+    <Text style={[wStyles.brandKicker, { color: accent }]}>EVERYSENSE</Text>
+    <Text style={[wStyles.title, { color: textPrimary }]}>How can I help?</Text>
+    <Text style={[wStyles.subtitle, { color: textMuted }]}>
+      Ask questions, understand documents, or organize your day.
     </Text>
     <View style={wStyles.grid}>
       {QUICK_PROMPTS.map(p => (
         <TouchableOpacity
           key={p.text}
-          style={[wStyles.chip, { backgroundColor: p.color + (isDark ? '28' : '22'), borderColor: p.color + '55' }]}
+          style={[wStyles.chip, { backgroundColor: isDark ? '#151D32' : '#FFFFFF', borderColor: isDark ? 'rgba(214, 179, 106, 0.16)' : 'rgba(0,0,0,0.08)' }]}
           onPress={() => { Haptics.selectionAsync(); onPrompt(p.text); }}
           accessibilityRole="button"
           accessibilityLabel={p.text}
         >
-          <Ionicons name={p.icon as any} size={20} color={p.color} />
-          <Text style={[wStyles.chipText, { color: '#fff' }]}>{p.text}</Text>
+          <Ionicons name={p.icon as any} size={18} color={accent} />
+          <Text style={[wStyles.chipText, { color: textPrimary }]}>{p.text}</Text>
         </TouchableOpacity>
       ))}
     </View>
@@ -276,9 +279,10 @@ const WelcomeView = ({ accent, textPrimary, textMuted, isDark, onPrompt }: Welco
 
 const wStyles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 40 },
-  logo:      { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  title:     { fontSize: 26, fontWeight: '700', marginBottom: 8 },
-  subtitle:  { fontSize: 15, textAlign: 'center', lineHeight: 22, marginBottom: 32 },
+  logoWrap:  { marginBottom: 14 },
+  brandKicker: { fontSize: 13, fontWeight: '800', letterSpacing: 1.5, marginBottom: 4 },
+  title:     { fontSize: 24, fontWeight: '700', marginBottom: 8 },
+  subtitle:  { fontSize: 14, textAlign: 'center', lineHeight: 21, marginBottom: 30 },
   grid:      { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   chip:      { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14, borderWidth: 1, width: '47%' },
   chipText:  { fontSize: 13, fontWeight: '500', flex: 1 },
@@ -297,16 +301,25 @@ const AIAssistantScreen = () => {
   const [isListening,     setIsListening]     = useState(false);
   const [conversationId,  setConversationId]  = useState<string | null>(null);
   const [userId,          setUserId]          = useState<string | null>(null);
+  const [activeDocBanner, setActiveDocBanner] = useState<{ title: string; subtitle?: string } | null>(null);
 
   const listRef = useRef<FlatList>(null);
 
   // ── Load user session + most recent conversation on mount ─────────────────
   useEffect(() => {
+    console.log('[AIAssistantScreen] Assistant screen opened');
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       const uid = session?.user?.id ?? null;
       if (!uid) return;
       setUserId(uid);
+
+      // If documentContext was passed in route params, this is a fresh document inquiry;
+      // skip loading old past conversations so we don't overwrite the document context
+      if (route.params?.documentContext) {
+        console.log('[AIAssistantScreen] Skipping historical conversation load due to active documentContext');
+        return;
+      }
 
       const { data: conv } = await supabase
         .from('ai_conversations')
@@ -325,12 +338,15 @@ const AIAssistantScreen = () => {
           .order('created_at', { ascending: true });
 
         if (msgs && msgs.length > 0) {
-          setMessages(msgs.map(m => ({
-            role: m.role as 'user' | 'model',
-            text: m.text,
-            imageUri: m.image_uri ?? undefined,
-            timestamp: new Date(m.created_at),
-          })));
+          setMessages(prev => {
+            if (prev.length > 0) return prev;
+            return msgs.map(m => ({
+              role: m.role as 'user' | 'model',
+              text: m.text,
+              imageUri: m.image_uri ?? undefined,
+              timestamp: new Date(m.created_at),
+            }));
+          });
         }
       }
     })();
@@ -413,10 +429,13 @@ const AIAssistantScreen = () => {
 
   const speak = useCallback((text: string) => {
     if (!state.voiceAnnouncementsEnabled) return;
-    try { Speech.stop(); } catch {}
-    try { Speech.speak(text, { rate: state.accessibilitySettings.voiceSpeed }); } catch {}
+    ttsSpeakText(text, { rate: state.accessibilitySettings.voiceSpeed });
   }, [state.voiceAnnouncementsEnabled, state.accessibilitySettings.voiceSpeed]);
 
+
+  const navigation = useNavigation();
+  const route = useRoute<RouteProp<MainTabParamList, 'Assistant'>>();
+  const lastDocumentHandledRef = useRef<string | null>(null);
 
   useEffect(() => {
     voiceManager.announceScreenChange('assistant');
@@ -428,7 +447,7 @@ const AIAssistantScreen = () => {
     });
     return () => {
       voiceManager.removeCommand(['clear chat', 'new chat', 'start over']);
-      try { Speech.stop(); } catch {}
+      ttsStopSpeaking();
     };
   }, []);
 
@@ -436,10 +455,45 @@ const AIAssistantScreen = () => {
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
   }, []);
 
+  // Handle incoming document context from What Next engine
+  useEffect(() => {
+    const docContext = route.params?.documentContext;
+    const docTitle = route.params?.documentTitle;
+    const initialPrompt = route.params?.initialPrompt;
+
+    if (docContext && docContext !== lastDocumentHandledRef.current) {
+      lastDocumentHandledRef.current = docContext;
+      console.log('[AIAssistantScreen] Document context received for:', docTitle || 'document', 'length:', docContext.length);
+      setActiveDocBanner({ title: docTitle || 'Document' });
+      setConversationId(null);
+
+      const greeting = `I’m looking at your ${docTitle || 'document'}. What would you like to know?\n\n${docContext}`;
+      const greetingMsg: Message = {
+        role: 'model',
+        text: greeting,
+        timestamp: new Date(),
+      };
+      setMessages([greetingMsg]);
+      speak(`I’m looking at your ${docTitle || 'document'}. What would you like to know?`);
+      (navigation as any).setParams?.({
+        documentContext: undefined,
+        documentTitle: undefined,
+      });
+      scrollToBottom();
+    }
+
+    if (initialPrompt) {
+      console.log('[AIAssistantScreen] Initial prompt received:', initialPrompt);
+      setInput(initialPrompt);
+      (navigation as any).setParams?.({ initialPrompt: undefined });
+    }
+  }, [route.params?.documentContext, route.params?.documentTitle, route.params?.initialPrompt, speak, scrollToBottom, navigation]);
+
   const handleSend = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isLoading) return;
 
+    console.log('[AIAssistantScreen] User message submitted:', trimmed);
     const userMsg: Message = { role: 'user', text: trimmed, timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
@@ -452,6 +506,7 @@ const AIAssistantScreen = () => {
       const reply = await sendChatMessage(history, trimmed);
       const aiMsg: Message = { role: 'model', text: reply, timestamp: new Date() };
       setMessages(prev => [...prev, aiMsg]);
+      console.log('[AIAssistantScreen] Assistant message displayed');
       speak(reply);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
@@ -462,6 +517,7 @@ const AIAssistantScreen = () => {
         await persistMessage(convId, userId, 'model', reply);
       }
     } catch (err: any) {
+      console.error('[AIAssistantScreen] Error sending message:', err?.message);
       setMessages(prev => [...prev, { role: 'model', text: `Sorry, something went wrong: ${err?.message ?? 'Unknown error'}` }]);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } finally {
@@ -563,17 +619,56 @@ const AIAssistantScreen = () => {
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
       {/* Header */}
-      <View style={[styles.header, { backgroundColor: headerBg, borderBottomColor: borderCol }]}>
+      <View style={[styles.header, { backgroundColor: isDark ? 'rgba(11, 16, 32, 0.90)' : headerBg, borderBottomColor: borderCol }]}>
         <View style={styles.headerCenter}>
-          <AccessAidLogo size={34} showText={false} />
-          <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>AccessAid AI</Text>
+          <EverySenseLogo size={28} showText={false} />
+          <View style={{ alignItems: 'center' }}>
+            <Text style={[styles.headerTitle, { color: theme.textPrimary }]}>EVERYSENSE</Text>
+            <Text style={[styles.headerSubtitle, { color: theme.textSecondary }]}>How can I help?</Text>
+          </View>
         </View>
         {messages.length > 0 && (
-          <TouchableOpacity onPress={clearChat} style={styles.newChatBtn} accessibilityLabel="New chat">
+          <TouchableOpacity onPress={clearChat} style={styles.newChatBtn} accessibilityLabel="New conversation" accessibilityRole="button">
             <Ionicons name="create-outline" size={22} color={theme.textMuted} />
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Document Context Card when launched from What Next */}
+      {activeDocBanner && (
+        <View
+          style={[
+            styles.docBannerCard,
+            {
+              backgroundColor: isDark ? '#151D32' : '#F7F3EA',
+              borderColor: isDark ? 'rgba(214, 179, 106, 0.28)' : 'rgba(214, 179, 106, 0.4)',
+            },
+          ]}
+        >
+          <View style={[styles.docBannerIconCircle, { backgroundColor: isDark ? 'rgba(214, 179, 106, 0.16)' : 'rgba(214, 179, 106, 0.25)' }]}>
+            <Ionicons name="document-text-outline" size={16} color={theme.accent} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.docBannerLabel, { color: theme.accent }]}>
+              LOOKING AT
+            </Text>
+            <Text style={[styles.docBannerTitle, { color: theme.textPrimary }]} numberOfLines={1}>
+              {activeDocBanner.title}
+            </Text>
+            <Text style={[styles.docBannerPrompt, { color: theme.textSecondary }]}>
+              Ask me anything about it.
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => setActiveDocBanner(null)}
+            style={styles.docBannerCloseBtn}
+            accessibilityLabel="Dismiss document context"
+            accessibilityRole="button"
+          >
+            <Ionicons name="close" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Body */}
       <KeyboardAvoidingView
@@ -654,7 +749,7 @@ const AIAssistantScreen = () => {
                 style={[styles.input, { color: theme.textPrimary }]}
                 value={input}
                 onChangeText={setInput}
-                placeholder="Message AccessAid AI..."
+                placeholder="Message EverySense AI..."
                 placeholderTextColor={theme.placeholder}
                 multiline
                 maxLength={1000}
@@ -676,7 +771,7 @@ const AIAssistantScreen = () => {
             </TouchableOpacity>
           </View>
           <Text style={[styles.disclaimer, { color: theme.textMuted }]}>
-            AI can make mistakes. Always consult a professional for medical advice.
+            Always consult a professional for critical medical or financial matters.
           </Text>
         </View>
       </KeyboardAvoidingView>
@@ -699,12 +794,55 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
   },
   headerCenter: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  headerTitle:  { fontSize: 17, fontWeight: '700' },
-  newChatBtn:   { position: 'absolute', right: 16 },
+  headerTitle:  { fontSize: 16, fontWeight: '800', letterSpacing: 1.2 },
+  headerSubtitle: { fontSize: 12, fontWeight: '500', marginTop: 1 },
+  newChatBtn:   { position: 'absolute', right: 16, minHeight: 44, minWidth: 44, alignItems: 'center', justifyContent: 'center' },
+
+  docBannerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 12,
+  },
+  docBannerIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  docBannerLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
+  docBannerTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  docBannerPrompt: {
+    fontSize: 12,
+    fontWeight: '400',
+    marginTop: 1,
+  },
+  docBannerCloseBtn: {
+    padding: 6,
+    minHeight: 44,
+    minWidth: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   msgList: { paddingVertical: 16, paddingBottom: 8 },
 

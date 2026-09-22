@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Animated,
@@ -10,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { AppTheme, getThemeConfig } from '../../constants/theme';
-import { AccessAidLogo } from '../components/AccessAidLogo';
+import { EverySenseLogo } from '../components/EverySenseLogo';
 import { AccessibilitySetupPopup } from '../components/AccessibilitySetupPopup';
 import { BackgroundLogo } from '../components/BackgroundLogo';
 import { useApp } from '../contexts/AppContext';
@@ -33,8 +34,8 @@ const AccessibilitySetupScreen = () => {
 
     // Welcome message
     if (state.voiceAnnouncementsEnabled) {
-      Speech.speak(
-        'Welcome to AccessAid! Let\'s set up your accessibility preferences for the best experience.',
+      ttsSpeakText(
+        'Welcome to EverySense! Let\'s set up your accessibility preferences for the best experience.',
         {
           rate: state.accessibilitySettings.voiceSpeed,
           pitch: 1.0,
@@ -75,8 +76,8 @@ const AccessibilitySetupScreen = () => {
       <BackgroundLogo />
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
         <View style={styles.header}>
-          <AccessAidLogo size={100} showText={true} />
-          <Text style={styles.welcomeText}>Welcome to AccessAid!</Text>
+          <EverySenseLogo size={100} showText={true} />
+          <Text style={styles.welcomeText}>Welcome to EverySense!</Text>
           <Text style={styles.subtitleText}>Let's customize your accessibility experience</Text>
         </View>
 

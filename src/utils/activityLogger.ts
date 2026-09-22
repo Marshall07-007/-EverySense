@@ -1,5 +1,5 @@
 /**
- * AccessAid – Activity Logger
+ * EverySense – Activity Logger
  * ---------------------------
  * Logs every time the user uses a key accessibility feature.
  * All data stays on-device using AsyncStorage (no backend needed).
@@ -24,7 +24,7 @@ export type ActivityEntry = {
   timestamp: number;
 };
 
-const STORAGE_KEY = 'accessaid_activity_log';
+const STORAGE_KEY = 'everysense_activity_log';
 const MAX_ENTRIES = 200;
 
 // emojis for each type to show in the UI

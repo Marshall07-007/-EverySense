@@ -27,7 +27,7 @@ const SLIDES = [
   {
     id: '1',
     emoji: '👋',
-    title: 'Welcome to AccessAid',
+    title: 'Welcome to EverySense',
     description: 'Your personal health & accessibility companion — designed to make everyday life easier for people with disabilities.',
     gradient: ['#667eea', '#764ba2'],
     accent: '#a78bfa',

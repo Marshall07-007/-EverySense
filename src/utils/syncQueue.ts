@@ -6,19 +6,20 @@ const QUEUE_KEY = 'reminder_sync_queue_v1';
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type CreateData = {
-  id: string; // UUID generated client-side
-  title: string;
+  id?: string;
+  title?: string;
   description?: string;
-  reminder_datetime: string;
-  frequency: string;
-  priority: string;
+  reminder_datetime?: string;
+  frequency?: string;
+  priority?: string;
+  [key: string]: any;
 };
 
-type UpdateData = Partial<CreateData>;
+type UpdateData = Record<string, any>;
 
 export type SyncOp =
-  | { id: string; type: 'create'; userId: string; data: CreateData }
-  | { id: string; type: 'update'; reminderId: string; data: UpdateData }
+  | { id: string; type: 'create'; userId?: string; data: Record<string, any> }
+  | { id: string; type: 'update'; reminderId: string; data: Record<string, any> }
   | { id: string; type: 'delete'; reminderId: string }
   | { id: string; type: 'complete'; reminderId: string; isCompleted: boolean };
 
@@ -43,8 +44,10 @@ const saveQueue = async (queue: SyncOp[]): Promise<void> => {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+export type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+
 /** Add an operation to the offline queue. */
-export const addToQueue = async (op: Omit<SyncOp, 'id'>): Promise<void> => {
+export const addToQueue = async (op: DistributiveOmit<SyncOp, 'id'>): Promise<void> => {
   const queue = await loadQueue();
   const entry = {
     ...op,

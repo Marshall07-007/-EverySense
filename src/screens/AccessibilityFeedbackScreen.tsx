@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useMemo, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import {
@@ -94,15 +95,14 @@ const AccessibilityFeedbackScreen: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [voiceListening, setVoiceListening] = useState<string | null>(null);
 
-  const getAuthUserId = async (): Promise<string | null> => {
+  const getAuthUserId = async (): Promise<string> => {
     const { data } = await supabase.auth.getSession();
-    return data.session?.user?.id ?? null;
+    return data.session?.user?.id ?? 'anonymous';
   };
 
   const speakText = (text: string) => {
     if (!state.voiceAnnouncementsEnabled) return;
-    try { Speech.stop(); } catch {}
-    try { Speech.speak(text, { rate: state.accessibilitySettings.voiceSpeed }); } catch {}
+    ttsSpeakText(text, { rate: state.accessibilitySettings.voiceSpeed });
   };
 
   // ── Voice input helper ────────────────────────────────────

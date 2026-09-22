@@ -1,5 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import { Platform } from 'react-native';
 
 // Conditional import for expo-speech-recognition (not available in Expo Go)
@@ -28,6 +29,7 @@ export class VoiceCommandManager {
   private listenersInitialized = false;
   private voiceAnnouncementsEnabled = true; // Global toggle for voice announcements
   private onStopCallback: (() => void) | null = null;
+  private onTranscriptCallback: ((text: string, isFinal: boolean) => void) | null = null;
 
   setCurrentScreen(screen: string) {
     this.currentScreen = screen;
@@ -79,27 +81,22 @@ export class VoiceCommandManager {
 
   speak(text: string, rate: number = 1.0) {
     if (!this.voiceAnnouncementsEnabled) return;
-    try {
-      Speech.stop();
-    } catch {}
-    try {
-      const safeRate = Math.max(0.5, Math.min(rate, 2.0));
-      Speech.speak(text, {
-        rate: safeRate,
-        pitch: 1.0,
-        language: undefined,
-      });
-    } catch {}
+    const safeRate = Math.max(0.5, Math.min(rate, 2.0));
+    ttsSpeakText(text, {
+      rate: safeRate,
+      pitch: 1.0,
+    });
     this.cooldownUntil = Date.now() + this.cooldownMs;
   }
 
-  async startListening(onStop?: () => void) {
+  async startListening(onStop?: () => void, onTranscript?: (text: string, isFinal: boolean) => void) {
     if (this.recognizing) {
       return;
     }
 
-    // Store callback so listeners (initialized only once) can call it on end/error
+    // Store callbacks so listeners can report live transcripts and stop events
     this.onStopCallback = onStop ?? null;
+    this.onTranscriptCallback = onTranscript ?? null;
 
     // Web (Expo web / Chrome) uses the browser's built-in SpeechRecognition API
     if (Platform.OS === 'web') {
@@ -141,12 +138,14 @@ export class VoiceCommandManager {
         });
 
         ExpoSpeechRecognitionModule.addListener('result', (event: any) => {
-          
           const transcript = event.results?.[0]?.transcript;
           const isFinal = event.isFinal;
           
-          if (transcript && isFinal && this.isListening) {
-            this.processVoiceInput(transcript);
+          if (transcript) {
+            this.onTranscriptCallback?.(transcript, !!isFinal);
+            if (isFinal && this.isListening) {
+              this.processVoiceInput(transcript);
+            }
           }
         });
 
@@ -185,11 +184,10 @@ export class VoiceCommandManager {
 
   private startWebSpeechRecognition() {
     try {
+      const globalObj: any = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : {};
       const SRWeb: any = 
-        (global as any).webkitSpeechRecognition || 
-        (global as any).SpeechRecognition || 
-        (window as any).webkitSpeechRecognition || 
-        (window as any).SpeechRecognition;
+        globalObj.webkitSpeechRecognition || 
+        globalObj.SpeechRecognition;
         
       if (SRWeb) {
         const rec = new SRWeb();

@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -98,8 +99,7 @@ const MedicationTrackerScreen = ({ navigation }: { navigation: any }) => {
 
   const speak = useCallback((text: string) => {
     if (!state.voiceAnnouncementsEnabled) return;
-    try { Speech.stop(); } catch {}
-    try { Speech.speak(text, { rate: state.accessibilitySettings.voiceSpeed }); } catch {}
+    ttsSpeakText(text, { rate: state.accessibilitySettings.voiceSpeed });
   }, [state.voiceAnnouncementsEnabled, state.accessibilitySettings.voiceSpeed]);
 
   // ── Load data ──────────────────────────────────────────────────────────────

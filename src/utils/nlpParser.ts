@@ -19,6 +19,10 @@ export interface ParsedReminder {
   rawText: string; // Original text for debugging
 }
 
+function escapeRegExp(string: string): string {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Main parser function
  * Extracts reminder details from natural language text
@@ -44,8 +48,17 @@ export function parseReminderFromSpeech(text: string): ParsedReminder | null {
   // Extract date/time
   const dateTimeResult = parseDateTime(cleanedText);
   if (dateTimeResult) {
-    // Remove the matched date/time phrase from text to get the title
-    cleanedText = cleanedText.replace(dateTimeResult.matched, '').trim();
+    // Remove matched date & time tokens cleanly from the text to get the pure title
+    if (dateTimeResult.dateMatched) {
+      cleanedText = cleanedText.replace(new RegExp(`\\b(?:on\\s+)?${escapeRegExp(dateTimeResult.dateMatched)}\\b`, 'gi'), ' ');
+    }
+    if (dateTimeResult.timeMatched) {
+      cleanedText = cleanedText.replace(new RegExp(`\\b(?:at\\s+)?${escapeRegExp(dateTimeResult.timeMatched)}\\b`, 'gi'), ' ');
+    }
+    if (dateTimeResult.matched && !dateTimeResult.dateMatched && !dateTimeResult.timeMatched) {
+      cleanedText = cleanedText.replace(new RegExp(`\\b${escapeRegExp(dateTimeResult.matched)}\\b`, 'gi'), ' ');
+    }
+    cleanedText = cleanedText.trim();
   }
   
   // What's left should be the title/task
@@ -77,6 +90,7 @@ function removeReminderTriggers(text: string): string {
     /^create\s+(?:a\s+)?reminder\s+(?:for|to)\s+/i,
     /^add\s+(?:a\s+)?reminder\s+(?:for|to)\s+/i,
     /^remind\s+me\s+to\s+/i,
+    /^remind\s+me\s+/i,
     /^reminder\s+(?:for|to)\s+/i,
     /^set\s+reminder\s+/i,
     /^make\s+(?:a\s+)?reminder\s+/i,
@@ -126,7 +140,6 @@ function extractCategory(text: string): { category?: ReminderCategory; cleanedTe
   for (const { pattern, category } of categoryPatterns) {
     if (pattern.test(text)) {
       // Don't remove the matched text as it might be part of the title
-      // e.g., "buy milk" - "buy" is both category indicator AND part of title
       return { category, cleanedText: text };
     }
   }
@@ -141,6 +154,7 @@ function extractTitle(text: string): string {
   // Remove common prepositions and connectors
   let title = text
     .replace(/\b(?:to|for|about|at|on|in)\b/gi, ' ')
+    .replace(/[.,!?]+$/, '')
     .replace(/\s+/g, ' ')
     .trim();
   
@@ -177,7 +191,6 @@ function calculateConfidence(
   if (dateTime) {
     score += dateTime.confidence * 0.3;
   } else {
-    // No datetime is okay, we'll use default (1 hour from now)
     score += 0.2;
   }
   
@@ -221,18 +234,11 @@ export function describeReminder(parsed: ParsedReminder): string {
  * Validate if the parsed reminder is complete enough to create
  */
 export function isValidParsedReminder(parsed: ParsedReminder): boolean {
-  // Must have a title
   if (!parsed.title || parsed.title.length < 2) {
     return false;
   }
   
-  // Confidence must be above threshold
-  if (parsed.confidence < 0.5) {
-    return false;
-  }
-  
-  // If datetime is provided, it should be in the future
-  if (parsed.datetime && parsed.datetime <= new Date()) {
+  if (parsed.confidence < 0.4) {
     return false;
   }
   

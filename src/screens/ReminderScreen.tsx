@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { RouteProp, useFocusEffect, useRoute } from '@react-navigation/native';
-import Constants from 'expo-constants';
+import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as Haptics from 'expo-haptics';
-import * as Notifications from 'expo-notifications';
+import { getNotificationsModule } from '../utils/safeNotifications';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
@@ -89,6 +90,7 @@ const storageKey = (userId?: string | null) => (userId ? `${baseKey}_${userId}` 
 
 const ReminderScreen: React.FC = () => {
   const { state, dispatch } = useApp();
+  const navigation = useNavigation();
   const route = useRoute<RouteProp<MainTabParamList, 'Reminders'>>();
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [toastVisible, setToastVisible] = useState(false);
@@ -130,7 +132,7 @@ const ReminderScreen: React.FC = () => {
   }, [reminders]);
 
   const intervalRef = useRef<any>(null);
-  const notifSubRef = useRef<Notifications.Subscription | null>(null);
+  const notifSubRef = useRef<any>(null);
   const spokenCooldownRef = useRef<Record<string, number>>({});
   const [alertReminder, setAlertReminder] = useState<Reminder | null>(null);
   const speakIntervalRef = useRef<any>(null);
@@ -176,39 +178,148 @@ const ReminderScreen: React.FC = () => {
 
   const theme = useMemo(() => getThemeConfig(state.accessibilitySettings.isDarkMode), [state.accessibilitySettings.isDarkMode]);
   const styles = useMemo(() => createStyles(theme), [theme]);
+  const [androidPickerMode, setAndroidPickerMode] = useState<'date' | 'time' | null>(null);
 
-  // Auto-open Create Reminder modal when navigated with prefillDescription
+  const parsePrefillDateSafely = (rawDate?: string): Date => {
+    const defaultFuture = new Date(Date.now() + 60 * 60 * 1000); // Default to 1 hr in future
+    if (!rawDate || typeof rawDate !== 'string' || rawDate.trim() === '' || rawDate === 'Not detected') {
+      return defaultFuture;
+    }
+
+    const cleanStr = rawDate.trim();
+    console.log('🗣️ [ReminderScreen Stage 3 - Parsing Prefill Date]:', cleanStr);
+
+    try {
+      let parsedDate: Date | null = null;
+
+      // Priority Pattern 1: Local ISO string (YYYY-MM-DDTHH:mm:ss) without timezone suffix
+      if (cleanStr.includes('T') || cleanStr.includes('Z')) {
+        const localIsoMatch = cleanStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/);
+        if (localIsoMatch && !cleanStr.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(cleanStr)) {
+          const [, y, m, d, hr, min, sec] = localIsoMatch;
+          const localParsed = new Date(
+            parseInt(y, 10),
+            parseInt(m, 10) - 1,
+            parseInt(d, 10),
+            parseInt(hr, 10),
+            parseInt(min, 10),
+            sec ? parseInt(sec, 10) : 0
+          );
+          if (!isNaN(localParsed.getTime())) parsedDate = localParsed;
+        }
+
+        if (!parsedDate) {
+          const ts = Date.parse(cleanStr);
+          if (!isNaN(ts)) {
+            const d = new Date(ts);
+            if (!isNaN(d.getTime()) && d.getFullYear() >= 2000) parsedDate = d;
+          }
+        }
+      }
+
+      // Pattern 1: DD-MM-YYYY or DD/MM/YYYY (4-digit year at end) e.g. "11-07-2020", "15/10/2026"
+      if (!parsedDate) {
+        const ddmmyyyyMatch = cleanStr.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/);
+        if (ddmmyyyyMatch) {
+          const day = parseInt(ddmmyyyyMatch[1], 10);
+          const month = parseInt(ddmmyyyyMatch[2], 10);
+          const year = parseInt(ddmmyyyyMatch[3], 10);
+          if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000) {
+            const d = new Date(year, month - 1, day, 10, 0, 0);
+            if (!isNaN(d.getTime())) parsedDate = d;
+          }
+        }
+      }
+
+      // Pattern 2: YYYY-MM-DD or YYYY/MM/DD (4-digit year at start) e.g. "2026-10-15"
+      if (!parsedDate) {
+        const yyyymmddMatch = cleanStr.match(/^(\d{4})[\/\.-](\d{1,2})[\/\.-](\d{1,2})$/);
+        if (yyyymmddMatch) {
+          const year = parseInt(yyyymmddMatch[1], 10);
+          const month = parseInt(yyyymmddMatch[2], 10);
+          const day = parseInt(yyyymmddMatch[3], 10);
+          if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2000) {
+            const d = new Date(year, month - 1, day, 10, 0, 0);
+            if (!isNaN(d.getTime())) parsedDate = d;
+          }
+        }
+      }
+
+      // Pattern 3: Fallback to standard Date.parse for text dates (e.g. "Oct 15, 2026")
+      if (!parsedDate) {
+        const ts = Date.parse(cleanStr);
+        if (!isNaN(ts)) {
+          const d = new Date(ts);
+          if (!isNaN(d.getTime()) && d.getFullYear() >= 2000) parsedDate = d;
+        }
+      }
+
+      if (!parsedDate || isNaN(parsedDate.getTime())) {
+        console.error('[Reminder Debug Stage 3 Warning]: Unparseable date string, defaulting to +1 hr:', cleanStr);
+        return defaultFuture;
+      }
+
+      // If parsed date is in the past, roll to tomorrow at the exact requested time rather than overwriting with +1hr
+      if (parsedDate.getTime() <= Date.now()) {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const parsedStart = new Date(parsedDate);
+        parsedStart.setHours(0, 0, 0, 0);
+        if (parsedStart.getTime() <= todayStart.getTime()) {
+          parsedDate.setDate(parsedDate.getDate() + 1);
+        }
+      }
+
+      console.log('🗣️ [ReminderScreen Date Applied Successfully]:');
+      console.log('   - Applied local date:', parsedDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }));
+      console.log('   - Applied local time:', parsedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }));
+      return parsedDate;
+    } catch (err) {
+      console.error('[Reminder Debug Stage 3 Error]: Date parsing threw exception:', err);
+      return defaultFuture;
+    }
+  };
+
+  // Auto-open Create Reminder modal when navigated with prefillDescription or prefillTitle
   useEffect(() => {
     const prefill = route.params?.prefillDescription;
-    if (prefill) {
-      const reminderTitle = prefill.length > 50 ? prefill.substring(0, 50) + '...' : prefill;
+    const prefillTitleParam = route.params?.prefillTitle;
+    const prefillDateParam = route.params?.prefillDate;
+
+    if (prefill || prefillTitleParam || prefillDateParam) {
+      console.log('🗣️ [Reminder Stage 3]: Navigation Params Received, title:', prefillTitleParam, 'rawDate:', prefillDateParam);
+
+      const reminderTitle = prefillTitleParam || (prefill && prefill.length > 50 ? prefill.substring(0, 50) + '...' : prefill || 'New Reminder');
       setTitle(reminderTitle);
-      setDescription(prefill);
-      setDate(new Date(Date.now() + 60 * 60 * 1000));
+      setDescription(prefill || '');
+
+      const targetDate = parsePrefillDateSafely(prefillDateParam);
+      setDate(targetDate);
+
       setCategory('personal');
       setPriority('medium');
       setRecurrence('once');
       setEditingReminderId(null);
       setModalVisible(true);
-      // Clear the param so it doesn't re-trigger on tab re-focus
-      if (route.params) {
-        (route.params as any).prefillDescription = undefined;
-      }
+
+      // Clear params safely using React Navigation API (never mutate route.params in-place)
+      (navigation as any).setParams?.({
+        prefillDescription: undefined,
+        prefillTitle: undefined,
+        prefillDate: undefined,
+      });
     }
-  }, [route.params?.prefillDescription]);
+  }, [route.params?.prefillDescription, route.params?.prefillTitle, route.params?.prefillDate]);
 
   // Helper to speak with voice announcements check
   const speakText = (text: string) => {
     if (!state.voiceAnnouncementsEnabled) return;
     if (!text?.trim()) return;
-    try { Speech.stop(); } catch { }
-    try {
-      const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
-      Speech.speak(text, {
-        rate: safeRate,
-        pitch: 1.0,
-      });
-    } catch { }
+    const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
+    ttsSpeakText(text, {
+      rate: safeRate,
+      pitch: 1.0,
+    });
   };
 
 //Find the best matching reminder by name using fuzzy matching
@@ -348,7 +459,7 @@ const ReminderScreen: React.FC = () => {
               setVoiceEditStep('select_field');
               setVoiceEditFlowVisible(true);
               speakText('What field would you like to edit now? You can say title, description, time, category, priority, or repeat.');
-              setupVoiceEditListener('select_field', null); // Reset field for new selection
+              setupVoiceEditListener('select_field', undefined); // Reset field for new selection
             } else {
               finalizeVoiceEdit();
             }
@@ -1012,57 +1123,87 @@ const ReminderScreen: React.FC = () => {
   // Effect 1: One-time setup — permissions, push token, Android channel, notification handler
   useEffect(() => {
     (async () => {
-      await Notifications.requestPermissionsAsync();
+      const Notifications = getNotificationsModule();
+      if (!Notifications) return;
+
       try {
-        const projectId = (Constants as any).expoConfig?.extra?.eas?.projectId || (Constants as any).easConfig?.projectId || (Constants as any).expoConfig?.projectId;
-        const tokenResp = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined as any);
-        if (tokenResp?.data) setPushToken(tokenResp.data);
-      } catch { }
-      if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('reminders', {
-          name: 'Reminders',
-          importance: Notifications.AndroidImportance.HIGH,
-          sound: 'default',
-          vibrationPattern: [0, 250, 250, 250],
-          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        });
+        await Notifications.requestPermissionsAsync();
+      } catch (e) {
+        console.warn('Failed to request notification permissions:', e);
       }
-      Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-          shouldShowAlert: true,
-          shouldPlaySound: true,
-          shouldSetBadge: false,
-          // @ts-ignore
-          shouldShowBanner: true,
-          // @ts-ignore
-          shouldShowList: true,
-        }),
-      });
+
+      // Check if running inside Expo Go (remote push tokens removed in Expo Go on SDK 53+)
+      const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient || (Constants as any).appOwnership === 'expo';
+
+      if (!isExpoGo) {
+        try {
+          const projectId = (Constants as any).expoConfig?.extra?.eas?.projectId || (Constants as any).easConfig?.projectId || (Constants as any).expoConfig?.projectId;
+          const tokenResp = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined as any);
+          if (tokenResp?.data) setPushToken(tokenResp.data);
+        } catch (e) {
+          console.warn('Failed to get Expo push token:', e);
+        }
+      }
+
+      if (Platform.OS === 'android') {
+        try {
+          await Notifications.setNotificationChannelAsync('reminders', {
+            name: 'Reminders',
+            importance: Notifications.AndroidImportance.HIGH,
+            sound: 'default',
+            vibrationPattern: [0, 250, 250, 250],
+            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          });
+        } catch (e) {
+          console.warn('Failed to set notification channel:', e);
+        }
+      }
+
+      try {
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: false,
+            // @ts-ignore
+            shouldShowBanner: true,
+            // @ts-ignore
+            shouldShowList: true,
+          }),
+        });
+      } catch (e) {
+        console.warn('Failed to set notification handler:', e);
+      }
     })();
   }, []);
 
   // Effect 2: Foreground notification listener — needs reminders in closure
   useEffect(() => {
-    if (notifSubRef.current) {
-      try { (Notifications as any).removeNotificationSubscription?.(notifSubRef.current); } catch { }
-    }
-    notifSubRef.current = Notifications.addNotificationReceivedListener((notification) => {
-      const { data } = notification.request.content as any;
-      const reminderId: string | undefined = data?.reminderId;
-      const nowTs = Date.now();
-      if (reminderId) {
-        const last = spokenCooldownRef.current[reminderId] || 0;
-        if (nowTs - last < 15000) {
-          return; // prevent duplicates within 15s
-        }
-        spokenCooldownRef.current[reminderId] = nowTs;
-        const rem = reminders.find(r => r.id === reminderId);
-        if (rem) presentAlert(rem);
+    const Notifications = getNotificationsModule();
+    if (Notifications) {
+      if (notifSubRef.current) {
+        try { (Notifications as any).removeNotificationSubscription?.(notifSubRef.current); } catch { }
       }
-    });
+      try {
+        notifSubRef.current = Notifications.addNotificationReceivedListener((notification) => {
+          const { data } = notification.request.content as any;
+          const reminderId: string | undefined = data?.reminderId;
+          const nowTs = Date.now();
+          if (reminderId) {
+            const last = spokenCooldownRef.current[reminderId] || 0;
+            if (nowTs - last < 15000) {
+              return; // prevent duplicates within 15s
+            }
+            spokenCooldownRef.current[reminderId] = nowTs;
+            const rem = reminders.find(r => r.id === reminderId);
+            if (rem) presentAlert(rem);
+          }
+        });
+      } catch (e) {}
+    }
 
-    // Web/background fallback checker (fires once per reminder)
-    if (Platform.OS === 'web') {
+    // Web/background fallback checker (fires once per reminder when Notifications module is absent or on web)
+    if (Platform.OS === 'web' || !Notifications) {
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = setInterval(() => {
         const now = new Date();
@@ -1080,24 +1221,27 @@ const ReminderScreen: React.FC = () => {
   const triggerReminder = async (rem: Reminder) => {
     // Haptic alert so hearing-impaired users feel the reminder firing
     try { await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning); } catch (_) { }
-    try {
-      // Default notification sound + TTS
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: '⏰ Reminder',
-          body: `It's time for: ${rem.title}${rem.description ? `. ${rem.description}` : ''}`,
-          sound: true,
-          data: { reminderId: rem.id },
-        },
-        trigger: null,
-      });
-    } catch (_) { }
+    const Notifications = getNotificationsModule();
+    if (Notifications) {
+      try {
+        // Default notification sound + TTS
+        await Notifications.scheduleNotificationAsync({
+          content: {
+            title: '⏰ Reminder',
+            body: `It's time for: ${rem.title}${rem.description ? `. ${rem.description}` : ''}`,
+            sound: true,
+            data: { reminderId: rem.id },
+          },
+          trigger: null,
+        });
+      } catch (_) { }
+    }
     presentAlert(rem);
   };
 
   const presentAlert = (rem: Reminder) => {
     setAlertReminder(rem);
-    try { Speech.stop(); } catch { }
+    ttsStopSpeaking();
     speakText(buildSpokenMessage(rem.title, rem.description));
     if (speakIntervalRef.current) clearInterval(speakIntervalRef.current);
     speakIntervalRef.current = setInterval(() => {
@@ -1108,7 +1252,7 @@ const ReminderScreen: React.FC = () => {
 
   const handleAlertYes = () => {
     try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (_) { }
-    try { Speech.stop(); } catch { }
+    ttsStopSpeaking();
     if (speakIntervalRef.current) clearInterval(speakIntervalRef.current);
     if (alertReminder) {
       setReminders(prev => prev.map(r => r.id === alertReminder.id ? { ...r, hasFired: true } : r));
@@ -1118,7 +1262,7 @@ const ReminderScreen: React.FC = () => {
 
   const handleSnooze = async (minutes: number) => {
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch (_) { }
-    try { Speech.stop(); } catch { }
+    ttsStopSpeaking();
     if (speakIntervalRef.current) clearInterval(speakIntervalRef.current);
     if (alertReminder) {
       const newDate = new Date(Date.now() + minutes * 60 * 1000);
@@ -1131,12 +1275,15 @@ const ReminderScreen: React.FC = () => {
   };
 
   const scheduleNative = async (rem: Reminder) => {
-    if (Platform.OS !== 'web') {
-      const delayMs = Math.max(1, rem.datetime.getTime() - Date.now());
-      await Notifications.scheduleNotificationAsync({
-        content: { title: '⏰ Reminder', body: rem.title, sound: true, data: { reminderId: rem.id } },
-        trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(Date.now() + delayMs) },
-      });
+    const Notifications = getNotificationsModule();
+    if (Notifications && Platform.OS !== 'web') {
+      try {
+        const delayMs = Math.max(1, rem.datetime.getTime() - Date.now());
+        await Notifications.scheduleNotificationAsync({
+          content: { title: '⏰ Reminder', body: rem.title, sound: true, data: { reminderId: rem.id } },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(Date.now() + delayMs) },
+        });
+      } catch (e) {}
     }
   };
 
@@ -1162,6 +1309,11 @@ const ReminderScreen: React.FC = () => {
   };
 
   const handleSendTestPush = async () => {
+    const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient || (Constants as any).appOwnership === 'expo';
+    if (isExpoGo) {
+      Alert.alert('Expo Go Limitation', 'Remote push notifications are not supported in Expo Go on SDK 57. Use local reminders or a development build.');
+      return;
+    }
     if (!pushToken) return;
     try {
       setSendingTest(true);
@@ -1198,7 +1350,7 @@ const ReminderScreen: React.FC = () => {
 
     try {
       // Stop any ongoing TTS first
-      await Speech.stop();
+      await ttsStopSpeaking();
 
       setVoiceField(field);
       setIsVoiceInputMode(true);
@@ -1273,42 +1425,33 @@ const ReminderScreen: React.FC = () => {
   // ── AI Briefing ──────────────────────────────────────────────────────────────
   const speakBriefingText = (text: string) => {
     mutedByUserRef.current = false;
-    try { Speech.stop(); } catch {}
+    ttsStopSpeaking();
     setBriefingPlaying(true);
     setBriefingMuted(false);
 
-    try {
-      Speech.speak(text, {
-        rate: Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0)),
-        onDone: () => {
-          // Natural end — only reset muted if the user didn't tap Mute
-          if (!mutedByUserRef.current) {
-            setBriefingPlaying(false);
-            setBriefingMuted(false);
-          }
-        },
-        onStopped: () => {
-          // Fired when Speech.stop() is called (mute tap or external stop)
+    ttsSpeakText(text, {
+      rate: Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0)),
+      onDone: () => {
+        if (!mutedByUserRef.current) {
           setBriefingPlaying(false);
-          // Do NOT touch briefingMuted here — mute handler already set it correctly
-        },
-        onError: () => {
-          setBriefingPlaying(false);
-          if (!mutedByUserRef.current) setBriefingMuted(false);
-        },
-      });
-    } catch {
-      // Speech.speak threw synchronously (some Android versions)
-      setBriefingPlaying(false);
-      if (!mutedByUserRef.current) setBriefingMuted(false);
-    }
+          setBriefingMuted(false);
+        }
+      },
+      onStopped: () => {
+        setBriefingPlaying(false);
+      },
+      onError: () => {
+        setBriefingPlaying(false);
+        if (!mutedByUserRef.current) setBriefingMuted(false);
+      },
+    });
   };
 
   const handleBriefing = async () => {
     // Mute — stop ongoing speech
     if (briefingPlaying) {
       mutedByUserRef.current = true;   // signal callbacks not to clear muted state
-      try { Speech.stop(); } catch {}
+      ttsStopSpeaking();
       setBriefingPlaying(false);
       setBriefingMuted(true);
       return;
@@ -1425,121 +1568,152 @@ const ReminderScreen: React.FC = () => {
   };
 
   const saveReminder = async () => {
-    if (!title.trim()) {
-      Alert.alert('Missing title', 'Please enter a reminder title.');
-      return;
-    }
-    if (!editingReminderId && reminders.length >= 50) {
-      Alert.alert('Limit reached', 'You can only have up to 50 reminders.');
-      return;
-    }
+    try {
+      console.error('[Reminder Stage 4]: saveReminder Initiated, title:', title.trim());
 
-    if (date.getTime() <= Date.now()) {
-      Alert.alert('Invalid time', 'Please select a future date and time.');
-      return;
-    }
-
-    const userId = state.user?.id;
-
-    if (editingReminderId) {
-      const existingReminder = reminders.find(r => r.id === editingReminderId);
-
-      // Apply update to local state immediately so the user sees changes right away
-      if (existingReminder) {
-        const updated: Reminder = {
-          ...existingReminder,
-          title: title.trim(),
-          description: description.trim() || null,
-          datetime: date,
-          category,
-          priority,
-          recurrence,
-        };
-        animateLayout();
-        setReminders(prev => prev.map(r => r.id === editingReminderId ? updated : r));
-        scheduleForReminder(updated).catch(console.warn);
+      if (!title.trim()) {
+        console.error('[Reminder Stage 4 Error]: Missing reminder title');
+        Alert.alert('Missing title', 'Please enter a reminder title.');
+        return;
+      }
+      if (!editingReminderId && reminders.length >= 50) {
+        console.error('[Reminder Stage 4 Error]: Reminder limit reached');
+        Alert.alert('Limit reached', 'You can only have up to 50 reminders.');
+        return;
       }
 
-      setModalVisible(false);
-      setEditingReminderId(null);
-      speakText(`Reminder "${title.trim()}" updated`);
-      const isOnline = networkMonitor.getIsConnected();
-      showToast(isOnline ? 'Reminder updated' : 'Saved locally — will sync when online', isOnline ? 'success' : 'info');
+      // Safely validate and sanitize date object without wiping user's intended hour
+      let safeDate = date instanceof Date && !isNaN(date.getTime()) ? date : new Date(Date.now() + 60 * 60 * 1000);
+      if (safeDate.getTime() <= Date.now()) {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const safeStart = new Date(safeDate);
+        safeStart.setHours(0, 0, 0, 0);
+        if (safeStart.getTime() <= todayStart.getTime()) {
+          safeDate.setDate(safeDate.getDate() + 1);
+        }
+      }
 
-      // Sync to Supabase in background — queue if offline
-      const idToUpdate = editingReminderId!;
-      const updateData = {
+      const userId = state.user?.id;
+
+      if (editingReminderId) {
+        const existingReminder = reminders.find(r => r.id === editingReminderId);
+
+        // Apply update to local state immediately so the user sees changes right away
+        if (existingReminder) {
+          const updated: Reminder = {
+            ...existingReminder,
+            title: title.trim(),
+            description: description.trim() || undefined,
+            datetime: safeDate,
+            category,
+            priority,
+            recurrence,
+          };
+          animateLayout();
+          setReminders(prev => prev.map(r => r.id === editingReminderId ? updated : r));
+          scheduleForReminder(updated).catch(err => console.warn('[Reminder Warning]: scheduleForReminder error:', err?.message || String(err)));
+        }
+
+        setModalVisible(false);
+        setEditingReminderId(null);
+        speakText(`Reminder "${title.trim()}" updated`);
+        const isOnline = networkMonitor.getIsConnected();
+        showToast(isOnline ? 'Reminder updated' : 'Saved locally — will sync when online', isOnline ? 'success' : 'info');
+
+        // Sync to Supabase in background — queue if offline
+        const idToUpdate = editingReminderId!;
+        const updateData = {
+          title: title.trim(),
+          description: description.trim() || null,
+          reminder_datetime: safeDate.toISOString(),
+          frequency: recurrence,
+          priority: priority,
+        };
+        (async () => {
+          try {
+            const { error } = await supabase
+              .from('reminders')
+              .update(updateData)
+              .eq('id', idToUpdate);
+            if (error) {
+              console.warn('[Reminder] Supabase update response note:', error.message);
+              await addToQueue({ type: 'update', reminderId: idToUpdate, data: updateData });
+              if (isMountedRef.current) setPendingCount(prev => prev + 1);
+            }
+          } catch (err: any) {
+            console.warn('[Reminder] Supabase update catch:', err?.message || String(err));
+            await addToQueue({ type: 'update', reminderId: idToUpdate, data: updateData });
+            if (isMountedRef.current) setPendingCount(prev => prev + 1);
+          }
+        })();
+
+        return;
+      }
+
+      // Build the reminder object immediately so UI updates instantly
+      const reminderId = generateUUID(); // Generate UUID once and reuse
+      const newReminder: Reminder = {
+        id: reminderId,
+        title: title.trim(),
+        description: description.trim() || undefined,
+        datetime: safeDate,
+        isCompleted: false,
+        createdAt: new Date(),
+        category,
+        priority,
+        recurrence,
+      };
+
+      console.error('[Reminder Stage 5]: Reminder Object Created Locally, id:', newReminder.id);
+
+      // Close modal and show reminder in list right away
+      animateLayout();
+      setReminders(prev => [...prev, newReminder]);
+      setModalVisible(false);
+      speakText(`Reminder "${title.trim()}" created successfully`);
+      const isOnline = networkMonitor.getIsConnected();
+      showToast(isOnline ? 'Reminder saved!' : 'Saved locally — will sync when online', isOnline ? 'success' : 'info');
+
+      // Do the background work (Supabase sync + local notification scheduling)
+      const createData = {
+        id: reminderId,
         title: title.trim(),
         description: description.trim() || null,
-        reminder_datetime: date.toISOString(),
+        reminder_datetime: safeDate.toISOString(),
         frequency: recurrence,
         priority: priority,
       };
+
       (async () => {
         try {
-          const { error } = await supabase
-            .from('reminders')
-            .update(updateData)
-            .eq('id', idToUpdate);
-          if (error) throw error;
-        } catch {
-          await addToQueue({ type: 'update', reminderId: idToUpdate, data: updateData });
-          setPendingCount(prev => prev + 1);
+          if (userId) {
+            try {
+              const { error } = await supabase.from('reminders').insert({ user_id: userId, ...createData });
+              if (error) {
+                console.warn('[Reminder] Supabase insert response note (offline fallback):', error.message);
+                await addToQueue({ type: 'create', data: { userId, ...createData } } as any);
+                if (isMountedRef.current) setPendingCount(prev => prev + 1);
+              }
+            } catch (supaErr: any) {
+              console.warn('[Reminder] Supabase insert exception (offline fallback):', supaErr?.message || String(supaErr));
+              await addToQueue({ type: 'create', data: { userId, ...createData } } as any);
+              if (isMountedRef.current) setPendingCount(prev => prev + 1);
+            }
+          }
+
+          // Schedule local notification safely (respects Expo Go / null Notifications module)
+          console.error('[Reminder Stage 6]: Scheduling Local Notification...');
+          await scheduleForReminder(newReminder);
+          console.error('[Reminder Stage 6]: Local Notification Scheduling Finished Successfully');
+        } catch (bgErr: any) {
+          console.error('[Reminder Stage 6 Error in background scheduling]:', bgErr?.message || String(bgErr));
         }
       })();
-
-      return;
+    } catch (saveErr: any) {
+      console.error('[Reminder Stage 4 Fatal Error in saveReminder]:', saveErr?.message || String(saveErr));
+      Alert.alert('Error', 'Could not save reminder. Please try again.');
     }
-
-    // Build the reminder object immediately so UI updates instantly
-    const reminderId = generateUUID(); // Generate UUID once and reuse
-    const newReminder: Reminder = {
-      id: reminderId,
-      title: title.trim(),
-      description: description.trim() || null,
-      datetime: date,
-      isCompleted: false,
-      createdAt: new Date(),
-      category,
-      priority,
-      recurrence,
-    };
-
-    // Close modal and show reminder in list right away
-    animateLayout();
-    setReminders(prev => [...prev, newReminder]);
-    setModalVisible(false);
-    speakText(`Reminder "${title.trim()}" created successfully`);
-    const isOnline = networkMonitor.getIsConnected();
-    showToast(isOnline ? 'Reminder saved!' : 'Saved locally — will sync when online', isOnline ? 'success' : 'info');
-
-    // Do the slow work (Supabase sync + scheduling) in the background
-    const createData = {
-      id: reminderId, // Include the generated UUID
-      title: title.trim(),
-      description: description.trim() || null,
-      reminder_datetime: date.toISOString(),
-      frequency: recurrence,
-      priority: priority,
-    };
-    (async () => {
-      try {
-        if (userId) {
-          try {
-            await supabase.from('reminders').insert({ user_id: userId, ...createData });
-          } catch {
-            // Offline — queue the create for later sync
-            await addToQueue({ type: 'create', userId, data: createData });
-            if (isMountedRef.current) setPendingCount(prev => prev + 1);
-          }
-        }
-
-        // Schedule notification (handles recurrence internally)
-        await scheduleForReminder(newReminder);
-      } catch (err) {
-        console.warn('Background save error:', err);
-      }
-    })();
   };
 
   const scheduleRecurringReminders = async (reminder: Reminder) => {
@@ -1555,16 +1729,19 @@ const ReminderScreen: React.FC = () => {
         nextDate.setMonth(nextDate.getMonth() + i);
       }
 
-      if (Platform.OS !== 'web' && nextDate.getTime() > Date.now()) {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: '⏰ Recurring Reminder',
-            body: reminder.title,
-            sound: true,
-            data: { reminderId: reminder.id }
-          },
-          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: nextDate },
-        });
+      const Notifications = getNotificationsModule();
+      if (Notifications && Platform.OS !== 'web' && nextDate.getTime() > Date.now()) {
+        try {
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: '⏰ Recurring Reminder',
+              body: reminder.title,
+              sound: true,
+              data: { reminderId: reminder.id }
+            },
+            trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: nextDate },
+          });
+        } catch (e) {}
       }
     }
   };
@@ -1845,6 +2022,9 @@ const ReminderScreen: React.FC = () => {
 
   const renderItem = ({ item }: { item: Reminder }) => {
     const isOverdue = !item.isCompleted && item.datetime < new Date();
+    const dateStr = item.datetime.toLocaleDateString([], { month: 'short', day: 'numeric', weekday: 'short' });
+    const timeStr = item.datetime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+
     return (
       <TouchableOpacity
         style={[
@@ -1857,43 +2037,71 @@ const ReminderScreen: React.FC = () => {
         onLongPress={() => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           const overdueNote = isOverdue ? ' This reminder is overdue.' : '';
-          const msg = `${item.title}. ${item.description || ''}. Scheduled for ${formatPreview(item.datetime)}.${overdueNote}`;
+          const msg = `${item.title}. Scheduled for ${dateStr} at ${timeStr}.${overdueNote}`;
           speakText(msg);
         }}
         delayLongPress={400}
       >
-        <View style={[styles.priorityIndicator, { backgroundColor: isOverdue ? theme.danger : getPriorityColor(item.priority) }]} />
         <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
-            <Text style={{ fontSize: 20, marginRight: 8 }}>{getCategoryIcon(item.category)}</Text>
-            <Text style={[styles.cardTitle, item.isCompleted && styles.cardTitleCompleted]} numberOfLines={2}>
+          {/* Title and Status Row */}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
+            <Text style={[styles.cardTitle, item.isCompleted && styles.cardTitleCompleted, { flex: 1, marginRight: 8 }]} numberOfLines={2}>
               {item.title}
             </Text>
-          </View>
-          {item.description && (
-            <Text style={styles.cardDescription} numberOfLines={2} ellipsizeMode="tail">{item.description}</Text>
-          )}
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 }}>
-            {isOverdue && (
-              <Text style={styles.overdueLabel}>⚠️ Overdue</Text>
-            )}
-            <Text style={[styles.cardSubtitle, isOverdue && { color: theme.danger, fontWeight: '600' }]}>
-              🔔 {formatPreview(item.datetime)}
-            </Text>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
-            <View style={styles.metaChip}>
-              <Text style={[styles.metaChipText, { color: theme.accent }]}>{getRecurrenceText(item.recurrence)}</Text>
+            <View style={{
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 6,
+              borderWidth: 1,
+              backgroundColor: item.isCompleted
+                ? 'rgba(52, 211, 153, 0.12)'
+                : isOverdue
+                  ? 'rgba(224, 106, 106, 0.14)'
+                  : 'rgba(214, 179, 106, 0.14)',
+              borderColor: item.isCompleted
+                ? 'rgba(52, 211, 153, 0.35)'
+                : isOverdue
+                  ? 'rgba(224, 106, 106, 0.35)'
+                  : 'rgba(214, 179, 106, 0.35)',
+            }}>
+              <Text style={{
+                fontSize: 11,
+                fontWeight: '700',
+                letterSpacing: 0.3,
+                color: item.isCompleted ? theme.success : isOverdue ? theme.danger : theme.accent,
+              }}>
+                {item.isCompleted ? 'Done' : isOverdue ? 'Overdue' : 'Active'}
+              </Text>
             </View>
-            {item.priority && (
-              <View style={[styles.metaChip, { borderColor: getPriorityColor(item.priority) }]}>
-                <Text style={[styles.metaChipText, { color: getPriorityColor(item.priority) }]}>
-                  {getPriorityLabel(item.priority)}
-                </Text>
+          </View>
+
+          {item.description ? (
+            <Text style={styles.cardDescription} numberOfLines={2} ellipsizeMode="tail">{item.description}</Text>
+          ) : null}
+
+          {/* Date & Time Row */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, gap: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="calendar-outline" size={14} color={isOverdue ? theme.danger : theme.accent} />
+              <Text style={[styles.cardSubtitle, isOverdue && { color: theme.danger, fontWeight: '600' }]}>
+                {dateStr}
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Ionicons name="time-outline" size={14} color={isOverdue ? theme.danger : theme.textSecondary} />
+              <Text style={[styles.cardSubtitle, isOverdue && { color: theme.danger, fontWeight: '600' }]}>
+                {timeStr}
+              </Text>
+            </View>
+            {item.recurrence && item.recurrence !== 'once' && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                <Ionicons name="repeat-outline" size={13} color={theme.textMuted} />
+                <Text style={{ fontSize: 12, color: theme.textMuted }}>{item.recurrence}</Text>
               </View>
             )}
           </View>
         </View>
+
         <View style={styles.cardActions}>
           <TouchableOpacity
             onPress={() => toggleComplete(item.id)}
@@ -1902,7 +2110,7 @@ const ReminderScreen: React.FC = () => {
           >
             <Ionicons
               name={item.isCompleted ? 'checkmark-circle' : 'ellipse-outline'}
-              size={26}
+              size={24}
               color={item.isCompleted ? theme.success : theme.textMuted}
             />
           </TouchableOpacity>
@@ -1911,14 +2119,14 @@ const ReminderScreen: React.FC = () => {
             style={styles.actionBtn}
             accessibilityLabel="Edit reminder"
           >
-            <Ionicons name="create-outline" size={24} color={theme.accent} />
+            <Ionicons name="create-outline" size={22} color={theme.accent} />
           </TouchableOpacity>
           <TouchableOpacity
             onPress={() => removeReminder(item.id)}
             style={styles.actionBtn}
             accessibilityLabel="Delete reminder"
           >
-            <Ionicons name="trash" size={24} color={theme.danger} />
+            <Ionicons name="trash-outline" size={22} color={theme.danger} />
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
@@ -1943,10 +2151,10 @@ const ReminderScreen: React.FC = () => {
         {/* Title row with Briefing button */}
         <View style={styles.headerRow}>
           <View>
-            <Text style={styles.headerTitle}>✨ Reminders</Text>
+            <Text style={styles.headerTitle}>Reminders</Text>
             <Text style={styles.headerSubtitle}>
               {filteredReminders.filter(r => !r.isCompleted).length} Active • {reminders.length} Total
-              {pendingCount > 0 ? `  •  ⏳ ${pendingCount} pending sync` : ''}
+              {pendingCount > 0 ? `  •  ${pendingCount} pending sync` : ''}
             </Text>
           </View>
           <TouchableOpacity
@@ -1961,7 +2169,7 @@ const ReminderScreen: React.FC = () => {
             accessibilityLabel={
               briefingPlaying ? 'Mute briefing' :
               briefingMuted   ? 'Unmute briefing' :
-              'Play AI briefing'
+              'Play briefing'
             }
           >
             <Ionicons
@@ -1972,13 +2180,13 @@ const ReminderScreen: React.FC = () => {
                 'volume-medium'
               }
               size={16}
-              color="#fff"
+              color="#0B1020"
             />
-            <Text style={styles.briefingBtnText}>
+            <Text style={[styles.briefingBtnText, { color: '#0B1020' }]}>
               {briefingMuted   ? 'Unmute'    :
                briefingPlaying ? 'Mute'      :
-               briefingLoading ? 'Thinking…' :
-               'Briefing'}
+               briefingLoading ? 'One moment…' :
+               'Daily Briefing'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -2023,7 +2231,7 @@ const ReminderScreen: React.FC = () => {
                     styles.filterChip,
                     filterCategory === cat && styles.filterChipActive
                   ]}
-                  onPress={() => setFilterCategory(cat)}
+                  onPress={() => setFilterCategory(cat as any)}
                   accessibilityLabel={`Filter by ${cat === 'all' ? 'all categories' : cat}`}
                   accessibilityRole="button"
                   accessibilityState={{ selected: filterCategory === cat }}
@@ -2287,36 +2495,74 @@ const ReminderScreen: React.FC = () => {
                         style={styles.datePicker}
                       />
                     ) : (
-                      <>
-                        <TouchableOpacity
-                          style={styles.actionButton}
-                          onPress={() => setShowPicker(true)}
-                          accessibilityLabel="Pick date and time"
-                          accessibilityRole="button"
-                        >
-                          <Text style={styles.actionButtonText}>Pick date & time</Text>
-                        </TouchableOpacity>
-                        {showPicker && (
+                      <View style={{ gap: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 10, backgroundColor: theme.inputBackground, borderRadius: 12, borderWidth: 1, borderColor: theme.inputBorder }}>
+                          <View>
+                            <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: '600' }}>Scheduled For</Text>
+                            <Text style={{ fontSize: 14, color: theme.textPrimary, fontWeight: '700', marginTop: 2 }}>
+                              {date instanceof Date && !isNaN(date.getTime()) ? date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Set Date & Time'}
+                            </Text>
+                          </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 10 }}>
+                          <TouchableOpacity
+                            style={[styles.actionButton, { flex: 1, paddingVertical: 10 }]}
+                            onPress={() => setAndroidPickerMode('date')}
+                            accessibilityLabel="Change reminder date"
+                            accessibilityRole="button"
+                          >
+                            <Text style={styles.actionButtonText}>📅 Change Date</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.actionButton, { flex: 1, paddingVertical: 10 }]}
+                            onPress={() => setAndroidPickerMode('time')}
+                            accessibilityLabel="Change reminder time"
+                            accessibilityRole="button"
+                          >
+                            <Text style={styles.actionButtonText}>⏰ Change Time</Text>
+                          </TouchableOpacity>
+                        </View>
+                        {androidPickerMode === 'date' && (
                           <DateTimePicker
-                            value={date}
-                            mode="datetime"
+                            value={date instanceof Date && !isNaN(date.getTime()) ? date : new Date()}
+                            mode="date"
                             display="default"
                             onChange={(event: any, selectedDate?: Date) => {
+                              setAndroidPickerMode(null);
                               try {
-                                setShowPicker(false);
-                                // Only update if a valid date was provided
-                                if (selectedDate && selectedDate instanceof Date && !isNaN(selectedDate.getTime())) {
-                                  setDate(selectedDate);
+                                if (event?.type !== 'dismissed' && selectedDate && selectedDate instanceof Date && !isNaN(selectedDate.getTime())) {
+                                  const base = date instanceof Date && !isNaN(date.getTime()) ? date : new Date();
+                                  const updated = new Date(base);
+                                  updated.setFullYear(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+                                  if (!isNaN(updated.getTime())) setDate(updated);
                                 }
                               } catch (error) {
-                                console.error('DatePicker error:', error);
-                                setShowPicker(false);
+                                console.error('DatePicker date error:', error);
                               }
                             }}
-                            minimumDate={new Date()}
                           />
                         )}
-                      </>
+                        {androidPickerMode === 'time' && (
+                          <DateTimePicker
+                            value={date instanceof Date && !isNaN(date.getTime()) ? date : new Date()}
+                            mode="time"
+                            display="default"
+                            onChange={(event: any, selectedDate?: Date) => {
+                              setAndroidPickerMode(null);
+                              try {
+                                if (event?.type !== 'dismissed' && selectedDate && selectedDate instanceof Date && !isNaN(selectedDate.getTime())) {
+                                  const base = date instanceof Date && !isNaN(date.getTime()) ? date : new Date();
+                                  const updated = new Date(base);
+                                  updated.setHours(selectedDate.getHours(), selectedDate.getMinutes());
+                                  if (!isNaN(updated.getTime())) setDate(updated);
+                                }
+                              } catch (error) {
+                                console.error('DatePicker time error:', error);
+                              }
+                            }}
+                          />
+                        )}
+                      </View>
                     )}
                   </View>
                 ) : (
@@ -2590,21 +2836,23 @@ const createStyles = (theme: AppTheme) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
-      backgroundColor: '#3B82F6', // blue = default/idle
+      backgroundColor: theme.accent,
       paddingHorizontal: 14,
       paddingVertical: 9,
-      borderRadius: 10,
+      borderRadius: 12,
       marginTop: 6,
     },
     briefingBtnLoading: {
-      backgroundColor: '#3B82F6', // stays blue while loading
+      backgroundColor: theme.accent,
       opacity: 0.75,
     },
     briefingBtnPlaying: {
-      backgroundColor: '#22c55e', // green while TTS is speaking
+      backgroundColor: '#34D399',
     },
     briefingBtnMuted: {
-      backgroundColor: '#6b7280', // gray — muted / stopped
+      backgroundColor: theme.surfaceSecondary,
+      borderWidth: 1,
+      borderColor: theme.cardBorder,
     },
     briefingBtnText: {
       color: '#fff',
@@ -2837,7 +3085,7 @@ const createStyles = (theme: AppTheme) =>
       flex: 1,
       backgroundColor: theme.overlay,
     },
-    blurFill: { ...StyleSheet.absoluteFillObject, borderRadius: 24 },
+    blurFill: { ...StyleSheet.absoluteFill, borderRadius: 24 },
     // Used by alert/voice modals (centred card)
     sheet: {
       backgroundColor: theme.modalBackground,

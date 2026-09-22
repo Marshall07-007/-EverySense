@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Linking } from 'react-native';
-import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../contexts/AppContext';
 import {
@@ -129,11 +129,8 @@ const SOSButton: React.FC = () => {
     setCountdown(COUNTDOWN_SECONDS);
     setModalVisible(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    try {
-      Speech.stop();
-      const speakName = emergencyNameRef.current || 'emergency services';
-      Speech.speak(`Emergency SOS. Calling ${speakName} in ${COUNTDOWN_SECONDS} seconds.`);
-    } catch {}
+    const speakName = emergencyNameRef.current || 'emergency services';
+    ttsSpeakText(`Emergency SOS. Calling ${speakName} in ${COUNTDOWN_SECONDS} seconds.`);
 
     // Start countdown
     let remaining = COUNTDOWN_SECONDS;
@@ -156,8 +153,8 @@ const SOSButton: React.FC = () => {
     setModalVisible(false);
     hasTriggeredRef.current = false;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    try { Speech.stop(); } catch {}
-    try { Speech.speak('Emergency cancelled.'); } catch {}
+    ttsStopSpeaking();
+    ttsSpeakText('Emergency cancelled.');
   };
 
   const triggerSOS = () => {
@@ -170,12 +167,11 @@ const SOSButton: React.FC = () => {
     const callNumber = emergencyPhoneRef.current ? emergencyPhoneRef.current.replace(/\s+/g, '') : '911';
     const speakName = emergencyNameRef.current || 'emergency services';
 
-    try { Speech.stop(); } catch {}
-    try { Speech.speak(`Calling ${speakName} now.`); } catch {}
+    ttsSpeakText(`Calling ${speakName} now.`);
     // Small delay so speech starts before the OS call sheet appears
     setTimeout(() => {
       Linking.openURL(`tel:${callNumber}`).catch(() => {
-        try { Speech.speak(`Unable to place call. Please dial ${callNumber} manually.`); } catch {}
+        ttsSpeakText(`Unable to place call. Please dial ${callNumber} manually.`);
       });
     }, 800);
   };

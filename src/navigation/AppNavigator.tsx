@@ -6,6 +6,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import { useApp } from '../contexts/AppContext';
 import { getThemeConfig } from '../../constants/theme';
 import { RootStackParamList, MainTabParamList } from '../types';
@@ -24,7 +25,6 @@ import ReminderScreen from '../screens/ReminderScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import CheckInScreen from '../screens/CheckInScreen';
 import AIAssistantScreen from '../screens/AIAssistantScreen';
-import AccessiblePlacesScreen from '../screens/AccessiblePlacesScreen';
 import HealthDashboardScreen from '../screens/HealthDashboardScreen';
 import EmergencyCardScreen from '../screens/EmergencyCardScreen';
 import CameraGuideScreen from '../screens/CameraGuideScreen';
@@ -82,7 +82,7 @@ const MainTabNavigator = () => {
           } else if (route.name === 'CheckIn') {
             iconName = focused ? 'heart' : 'heart-outline';
           } else if (route.name === 'Assistant') {
-            iconName = focused ? 'sparkles' : 'sparkles-outline';
+            iconName = focused ? 'chatbubble-ellipses' : 'chatbubble-ellipses-outline';
           } else if (route.name === 'Profile') {
             iconName = focused ? 'person' : 'person-outline';
           } else {
@@ -94,17 +94,18 @@ const MainTabNavigator = () => {
         tabBarActiveTintColor: theme.accent,
         tabBarInactiveTintColor: theme.textMuted,
         tabBarStyle: {
-          backgroundColor: theme.cardBackground,
+          backgroundColor: theme.isDark ? '#0B1020' : '#FFFFFF',
           borderTopWidth: 1,
-          borderTopColor: theme.cardBorder,
-          paddingBottom: 5,
-          paddingTop: 5,
-          height: 60,
+          borderTopColor: theme.isDark ? 'rgba(214, 179, 106, 0.16)' : 'rgba(184, 141, 59, 0.20)',
+          paddingBottom: 6,
+          paddingTop: 6,
+          height: 64,
         },
         tabBarHideOnKeyboard: false,
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: '600',
+          letterSpacing: 0.3,
         },
         headerShown: false,
       })}
@@ -113,8 +114,7 @@ const MainTabNavigator = () => {
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           // Announce tab name when switching TO this tab (not when re-pressing the active tab)
           if (state.voiceAnnouncementsEnabled && !navigation.isFocused()) {
-            try { Speech.stop(); } catch {}
-            try { Speech.speak(route.name); } catch {}
+            ttsSpeakText(route.name);
           }
         },
       })}
@@ -170,7 +170,7 @@ const MainTabNavigator = () => {
 
 const navStyles = StyleSheet.create({
   container:  { flex: 1 },
-  sosOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 9999 },
+  sosOverlay: { ...StyleSheet.absoluteFill, zIndex: 9999 },
 });
 
 const AppNavigator = () => {
@@ -188,7 +188,7 @@ const AppNavigator = () => {
           <Stack.Screen
             name="Login"
             component={LoginScreen}
-            options={{ title: 'AccessAid Login' }}
+            options={{ title: 'EverySense Login' }}
           />
         ) : !state.hasSeenOnboarding ? (
           <Stack.Screen
@@ -207,12 +207,7 @@ const AppNavigator = () => {
             <Stack.Screen
               name="Main"
               component={MainTabNavigator}
-              options={{ title: 'AccessAid' }}
-            />
-            <Stack.Screen
-              name="AccessiblePlaces"
-              component={AccessiblePlacesScreen}
-              options={{ headerShown: false }}
+              options={{ title: 'EverySense' }}
             />
             <Stack.Screen
               name="HealthDashboard"

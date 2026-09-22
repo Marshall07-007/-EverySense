@@ -75,7 +75,7 @@ const FeedbackButton: React.FC<FeedbackButtonProps> = ({ screenName, compact = f
     }
     setSubmitting(true);
     const { data: sessionData } = await supabase.auth.getSession();
-    const authUserId = sessionData.session?.user?.id ?? null;
+    const authUserId = sessionData.session?.user?.id ?? 'anonymous';
     const { queued } = await submitFeedback({
       type: 'issue',
       data: {

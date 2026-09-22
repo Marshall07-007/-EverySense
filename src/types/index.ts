@@ -54,7 +54,6 @@ export type RootStackParamList = {
   Onboarding: undefined;
   AccessibilitySetup: undefined;
   Main: undefined;
-  AccessiblePlaces: undefined;
   HealthDashboard: undefined;
   EmergencyCard: undefined;
   CameraGuide: undefined;
@@ -64,8 +63,49 @@ export type RootStackParamList = {
 
 export type MainTabParamList = {
   Home: undefined;
-  Reminders: { prefillDescription?: string; pendingAlertReminderId?: string } | undefined;
+  Reminders: { prefillDescription?: string; prefillTitle?: string; prefillDate?: string; pendingAlertReminderId?: string } | undefined;
   CheckIn: undefined;
-  Assistant: undefined;
+  Assistant: { initialPrompt?: string; documentContext?: string; documentTitle?: string } | undefined;
   Profile: undefined;
 };
+
+export type SmartDocumentType =
+  | 'Electricity bill'
+  | 'Water bill'
+  | 'Invoice/receipt'
+  | 'College/education document'
+  | 'General document';
+
+export interface SmartScanResult {
+  documentType: SmartDocumentType;
+  title: string;
+  amount: string;
+  dueDate: string;
+  keyDates: string;
+  importantInfo: string;
+  explanation: string;
+  imageUri?: string;
+}
+
+export type WhatNextActionType =
+  | 'CREATE_REMINDER'
+  | 'EXPLAIN'
+  | 'CHAT'
+  | 'SAVE';
+
+export interface WhatNextAction {
+  id: string;
+  type: WhatNextActionType;
+  title: string;
+  description: string;
+  icon: string;
+  isPrimary?: boolean;
+  metadata?: Record<string, any>;
+}
+
+export interface WhatNextPlan {
+  summary: string;
+  steps: string[];
+  actions: WhatNextAction[];
+}
+

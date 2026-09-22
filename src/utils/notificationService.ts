@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { getNotificationsModule } from './safeNotifications';
 
 const NOTIF_IDS_KEY = 'notification_ids_v1';
 
@@ -35,6 +35,9 @@ const saveMap = async (map: NotifIdMap): Promise<void> => {
 /** Cancel all scheduled notifications for a specific reminder and remove its stored IDs. */
 export const cancelForReminder = async (reminderId: string): Promise<void> => {
   if (Platform.OS === 'web') return;
+  const Notifications = getNotificationsModule();
+  if (!Notifications) return;
+
   const map = await loadMap();
   const ids = map[reminderId] || [];
   for (const id of ids) {
@@ -54,10 +57,16 @@ export const cancelForReminder = async (reminderId: string): Promise<void> => {
  */
 export const scheduleForReminder = async (rem: NotifReminder): Promise<void> => {
   if (Platform.OS === 'web') return;
+  const Notifications = getNotificationsModule();
+  if (!Notifications) return;
 
    // Guard: check notification permission before scheduling
-  const { status } = await Notifications.getPermissionsAsync();
-  if (status !== 'granted') return;
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') return;
+  } catch (e) {
+    return;
+  }
 
   // Cancel any existing notifications for this reminder first
   await cancelForReminder(rem.id);
@@ -135,6 +144,8 @@ export const scheduleForReminder = async (rem: NotifReminder): Promise<void> => 
  */
 export const rescheduleAll = async (reminders: NotifReminder[]): Promise<void> => {
   if (Platform.OS === 'web') return;
+  const Notifications = getNotificationsModule();
+  if (!Notifications) return;
 
   try {
     await Notifications.cancelAllScheduledNotificationsAsync();

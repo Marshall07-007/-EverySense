@@ -11,6 +11,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -221,7 +222,7 @@ const JoinDateModal: React.FC<JoinDateModalProps> = ({ visible, onClose, theme, 
         </View>
 
         <Text style={[s.modalDescription, { color: theme.textSecondary }]}>
-          {joinDate ? `You joined AccessAid on ${formattedJoinDate}.` : 'We could not find your join date yet.'}
+          {joinDate ? `You joined EverySense on ${formattedJoinDate}.` : 'We could not find your join date yet.'}
         </Text>
       </View>
     </View>
@@ -413,13 +414,8 @@ const ProfileScreen = () => {
 
   const speakText = (text: string) => {
     if (!state.voiceAnnouncementsEnabled) return;
-    try {
-      Speech.stop();
-    } catch {}
-    try {
-      const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
-      Speech.speak(text, { rate: safeRate, pitch: 1.0 });
-    } catch {}
+    const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
+    ttsSpeakText(text, { rate: safeRate, pitch: 1.0 });
   };
 
   const handleLogout = () => {
@@ -839,18 +835,18 @@ const ProfileScreen = () => {
               </SafeAreaView>
             </Modal>
 
-            {/* ── Accessibility ── */}
+            {/* ── 2. ACCESSIBILITY ── */}
             <View style={s.section}>
-              <Text style={[s.sectionLabel, { color: theme.textMuted }]}>ACCESSIBILITY</Text>
+              <Text style={[s.sectionLabel, { color: theme.accent }]}>ACCESSIBILITY</Text>
               <View style={[s.card, { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder }]}>
 
                 {/* Brightness */}
                 <View style={s.accessibilityRow}>
                   <View style={s.accessibilityLabelRow}>
-                    <View style={[s.rowIcon, { backgroundColor: '#FFA726' + '22' }]}>
-                      <Ionicons name="sunny" size={16} color="#FFA726" />
+                    <View style={[s.rowIcon, { backgroundColor: 'rgba(214, 179, 106, 0.16)' }]}>
+                      <Ionicons name="sunny-outline" size={16} color={theme.accent} />
                     </View>
-                    <Text style={[s.accessibilityTitle, { color: theme.textPrimary }]}>Brightness</Text>
+                    <Text style={[s.accessibilityTitle, { color: theme.textPrimary }]}>Screen Brightness</Text>
                   </View>
                   <LevelSelector
                     levels={BRIGHTNESS_LEVELS}
@@ -868,10 +864,10 @@ const ProfileScreen = () => {
                 {/* Text Size */}
                 <View style={s.accessibilityRow}>
                   <View style={s.accessibilityLabelRow}>
-                    <View style={[s.rowIcon, { backgroundColor: '#42A5F5' + '22' }]}>
-                      <Ionicons name="text" size={16} color="#42A5F5" />
+                    <View style={[s.rowIcon, { backgroundColor: 'rgba(79, 124, 255, 0.16)' }]}>
+                      <Ionicons name="text-outline" size={16} color={theme.blue} />
                     </View>
-                    <Text style={[s.accessibilityTitle, { color: theme.textPrimary }]}>Text Size</Text>
+                    <Text style={[s.accessibilityTitle, { color: theme.textPrimary }]}>Text Scaling</Text>
                   </View>
                   <LevelSelector
                     levels={TEXT_ZOOM_LEVELS}
@@ -883,16 +879,46 @@ const ProfileScreen = () => {
                     accentColor={theme.accent}
                   />
                 </View>
+              </View>
+            </View>
+
+            {/* ── 3. VOICE & SPEECH ── */}
+            <View style={s.section}>
+              <Text style={[s.sectionLabel, { color: theme.accent }]}>VOICE & SPEECH</Text>
+              <View style={[s.card, { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder }]}>
+
+                {/* Spoken Announcements */}
+                <View style={s.darkModeRow}>
+                  <View style={[s.rowIcon, { backgroundColor: 'rgba(53, 198, 163, 0.16)' }]}>
+                    <Ionicons name="volume-high-outline" size={16} color={theme.teal} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.darkModeLabel, { color: theme.textPrimary }]}>Spoken Feedback</Text>
+                    <Text style={{ fontSize: 11, color: theme.textSecondary }}>Speak results and navigation</Text>
+                  </View>
+                  <Switch
+                    value={state.voiceAnnouncementsEnabled}
+                    onValueChange={(val) => {
+                      dispatch({ type: 'TOGGLE_VOICE_ANNOUNCEMENTS', payload: val });
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      speakText(`Voice announcements ${val ? 'enabled' : 'disabled'}`);
+                    }}
+                    trackColor={{ false: theme.inputBorder, true: theme.accent }}
+                    thumbColor={state.voiceAnnouncementsEnabled ? theme.accent : '#FFFFFF'}
+                    ios_backgroundColor={theme.inputBorder}
+                    accessibilityLabel="Spoken feedback toggle"
+                  />
+                </View>
 
                 <View style={[s.divider, { backgroundColor: theme.cardBorder }]} />
 
                 {/* Voice Speed */}
                 <View style={s.accessibilityRow}>
                   <View style={s.accessibilityLabelRow}>
-                    <View style={[s.rowIcon, { backgroundColor: '#66BB6A' + '22' }]}>
-                      <Ionicons name="volume-high" size={16} color="#66BB6A" />
+                    <View style={[s.rowIcon, { backgroundColor: 'rgba(214, 179, 106, 0.16)' }]}>
+                      <Ionicons name="speedometer-outline" size={16} color={theme.accent} />
                     </View>
-                    <Text style={[s.accessibilityTitle, { color: theme.textPrimary }]}>Voice Speed</Text>
+                    <Text style={[s.accessibilityTitle, { color: theme.textPrimary }]}>Speech Rate</Text>
                   </View>
                   <LevelSelector
                     levels={VOICE_SPEED_LEVELS}
@@ -904,32 +930,51 @@ const ProfileScreen = () => {
                     accentColor={theme.accent}
                   />
                 </View>
+              </View>
+            </View>
 
-                <View style={[s.divider, { backgroundColor: theme.cardBorder }]} />
+            {/* ── 4. NOTIFICATIONS ── */}
+            <View style={s.section}>
+              <Text style={[s.sectionLabel, { color: theme.accent }]}>NOTIFICATIONS</Text>
+              <View style={[s.card, { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder }]}>
+                <View style={s.darkModeRow}>
+                  <View style={[s.rowIcon, { backgroundColor: 'rgba(214, 179, 106, 0.16)' }]}>
+                    <Ionicons name="alarm-outline" size={16} color={theme.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.darkModeLabel, { color: theme.textPrimary }]}>Smart Reminders</Text>
+                    <Text style={{ fontSize: 11, color: theme.textSecondary }}>Timely audio and push alerts</Text>
+                  </View>
+                  <Ionicons name="checkmark-circle" size={20} color={theme.success} />
+                </View>
+              </View>
+            </View>
 
+            {/* ── 5. PREFERENCES ── */}
+            <View style={s.section}>
+              <Text style={[s.sectionLabel, { color: theme.accent }]}>PREFERENCES</Text>
+              <View style={[s.card, { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder }]}>
                 {/* Dark Mode */}
                 <View style={s.darkModeRow}>
-                  <View style={[s.rowIcon, { backgroundColor: '#6366f1' + '22' }]}>
-                    <Ionicons name="moon" size={16} color="#6366f1" />
+                  <View style={[s.rowIcon, { backgroundColor: 'rgba(214, 179, 106, 0.16)' }]}>
+                    <Ionicons name="moon-outline" size={16} color={theme.accent} />
                   </View>
-                  <Text style={[s.darkModeLabel, { color: theme.textPrimary }]}>Dark Mode</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.darkModeLabel, { color: theme.textPrimary }]}>Midnight Theme</Text>
+                    <Text style={{ fontSize: 11, color: theme.textSecondary }}>Deep Navy & Warm Ivory palette</Text>
+                  </View>
                   <Switch
                     value={isDarkMode}
                     onValueChange={handleDarkModeToggle}
                     trackColor={{ false: theme.inputBorder, true: theme.accent }}
                     thumbColor={isDarkMode ? theme.accent : '#FFFFFF'}
                     ios_backgroundColor={theme.inputBorder}
-                    accessibilityLabel="Dark mode toggle"
+                    accessibilityLabel="Midnight theme toggle"
                   />
                 </View>
 
-              </View>
-            </View>
+                <View style={[s.divider, { backgroundColor: theme.cardBorder }]} />
 
-            {/* ── App Info ── */}
-            <View style={s.section}>
-              <Text style={[s.sectionLabel, { color: theme.textMuted }]}>ABOUT</Text>
-              <View style={[s.card, { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder }]}>
                 <AppInfoRow label="Version" value="1.0.0" theme={theme} />
                 <AppInfoRow label="Member Since" value={formattedJoinDate} isLast theme={theme} />
               </View>
@@ -939,7 +984,7 @@ const ProfileScreen = () => {
             <View style={[s.sectionCard, { borderColor: theme.cardBorder, backgroundColor: theme.cardBackground, marginBottom: 16 }]}>
               <Text style={[s.sectionHeading, { color: theme.textPrimary }]}>♿ Accessibility Testing</Text>
               <Text style={[s.sectionSubtitle, { color: theme.textSecondary }]}>
-                Help improve AccessAid for everyone. Share your experience or report issues.
+                Help improve EverySense for everyone. Share your experience or report issues.
               </Text>
               <TouchableOpacity
                 style={[s.testingBtn, { backgroundColor: theme.accent }]}
@@ -1133,7 +1178,7 @@ const s = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 57,
     alignItems: 'center',
@@ -1486,7 +1531,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 20,
   },
   modalBackdropTouchable: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   joinDateModal: {
     width: '100%',

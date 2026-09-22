@@ -57,7 +57,7 @@ export const ModernCard: React.FC<ModernCardProps> = ({
         accessibilityRole={onPress ? 'button' : 'none'}
       >
         <LinearGradient
-          colors={['#4A90E2', '#357ABD']}
+          colors={['#1B243B', '#151D32']}
           style={styles.gradient}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -90,49 +90,53 @@ export const ModernCard: React.FC<ModernCardProps> = ({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 20,
+    borderRadius: 18,
     overflow: 'hidden',
+    borderWidth: 1,
   },
   defaultCard: {
-    backgroundColor: 'white',
-    shadowColor: '#000',
+    backgroundColor: '#151D32',
+    borderColor: 'rgba(214, 179, 106, 0.16)',
+    shadowColor: '#050811',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 3,
     },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
   },
   gradientCard: {
-    shadowColor: '#4A90E2',
+    borderColor: 'rgba(214, 179, 106, 0.24)',
+    shadowColor: '#050811',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  elevatedCard: {
+    backgroundColor: '#151D32',
+    borderColor: 'rgba(214, 179, 106, 0.20)',
+    shadowColor: '#050811',
     shadowOffset: {
       width: 0,
       height: 6,
     },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 8,
   },
-  elevatedCard: {
-    backgroundColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 12,
-  },
   outlinedCard: {
-    backgroundColor: 'white',
-    borderWidth: 2,
-    borderColor: '#E0E0E0',
+    backgroundColor: '#10172A',
+    borderWidth: 1,
+    borderColor: 'rgba(214, 179, 106, 0.28)',
     shadowOpacity: 0,
     elevation: 0,
   },
   gradient: {
-    padding: 20,
+    padding: 16,
   },
 });

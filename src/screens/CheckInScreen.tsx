@@ -1,7 +1,7 @@
 /**
  * CheckInScreen.tsx
  *
- * Daily wellness check-in for AccessAid users.
+ * Daily wellness check-in for EverySense users.
  * Users tap big emoji buttons to log their mood, pain level, and energy.
  * All check-ins are saved to Supabase and shown as a history list below.
  *
@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -195,8 +196,7 @@ const CheckInScreen = () => {
   //  TTS helper
   const speak = useCallback((text: string) => {
     if (!state.voiceAnnouncementsEnabled) return;
-    try { Speech.stop(); } catch {}
-    try { Speech.speak(text, { rate: state.accessibilitySettings.voiceSpeed }); } catch {}
+    ttsSpeakText(text, { rate: state.accessibilitySettings.voiceSpeed });
   }, [state.voiceAnnouncementsEnabled, state.accessibilitySettings.voiceSpeed]);
 
   // Load history from Supabase  
@@ -293,7 +293,7 @@ const CheckInScreen = () => {
  
   // History item  
   const renderHistoryItem = ({ item }: { item: CheckIn }) => (
-    <ModernCard variant="elevated" style={[histStyles.card, { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder }]}>
+    <ModernCard variant="elevated" style={[histStyles.card, { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder }] as any}>
       <Text style={[histStyles.date, { color: theme.textSecondary }]}>{formatDate(item.created_at)}</Text>
       <View style={histStyles.row}>
         {/* Mood */}
@@ -339,53 +339,53 @@ const CheckInScreen = () => {
 
           {/* Header */}
           <View style={styles.header}>
-            <Text style={[styles.title, { color: theme.textPrimary }]}>Daily Check-In</Text>
+            <Text style={[styles.title, { color: theme.textPrimary }]}>HOW ARE YOU DOING?</Text>
             <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
               {todayDone
-                ? "✅ You've checked in today — keep it up!"
-                : 'How are you feeling right now?'}
+                ? "You're all set for today. Take care of yourself."
+                : 'Take a calm moment to check in with yourself.'}
             </Text>
 
             {/* Medication Tracker card */}
             <TouchableOpacity
               onPress={() => navigationRef.current?.navigate('MedicationTracker')}
-              style={[styles.dashCard, { marginBottom: 10 }]}
+              style={[styles.dashCard, { marginBottom: 10, backgroundColor: theme.surface, borderColor: theme.cardBorder }]}
               accessibilityLabel="Open medication tracker"
             >
               <View style={styles.dashCardLeft}>
-                <View style={[styles.dashIconWrap, { backgroundColor: '#10b98122' }]}>
-                  <Ionicons name="medical" size={22} color="#10b981" />
+                <View style={[styles.dashIconWrap, { backgroundColor: 'rgba(53, 198, 163, 0.16)' }]}>
+                  <Ionicons name="medical-outline" size={20} color={theme.teal} />
                 </View>
                 <View>
-                  <Text style={styles.dashCardTitle}>Medications</Text>
-                  <Text style={styles.dashCardSub}>Track daily doses · Mark as taken</Text>
+                  <Text style={[styles.dashCardTitle, { color: theme.textPrimary }]}>Medications</Text>
+                  <Text style={[styles.dashCardSub, { color: theme.textSecondary }]}>Track daily doses · Mark as taken</Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={18} color="#10b981" />
+              <Ionicons name="chevron-forward" size={18} color={theme.accent} />
             </TouchableOpacity>
 
             {/* Dashboard card */}
             <TouchableOpacity
               onPress={() => navigationRef.current?.navigate('HealthDashboard')}
-              style={styles.dashCard}
+              style={[styles.dashCard, { backgroundColor: theme.surface, borderColor: theme.cardBorder }]}
               accessibilityLabel="View health dashboard"
             >
               <View style={styles.dashCardLeft}>
-                <View style={styles.dashIconWrap}>
-                  <Ionicons name="stats-chart" size={22} color="#7C3AED" />
+                <View style={[styles.dashIconWrap, { backgroundColor: 'rgba(214, 179, 106, 0.16)' }]}>
+                  <Ionicons name="stats-chart-outline" size={20} color={theme.accent} />
                 </View>
                 <View>
-                  <Text style={styles.dashCardTitle}>Health Dashboard</Text>
-                  <Text style={styles.dashCardSub}>Charts · Streaks · Report</Text>
+                  <Text style={[styles.dashCardTitle, { color: theme.textPrimary }]}>Health Summary</Text>
+                  <Text style={[styles.dashCardSub, { color: theme.textSecondary }]}>Patterns · Streaks · Insights</Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={18} color="#7C3AED" />
+              <Ionicons name="chevron-forward" size={18} color={theme.accent} />
             </TouchableOpacity>
           </View>
  
           {/* Form card */}
           {!todayDone && (
-            <ModernCard variant="elevated" style={[styles.formCard, { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder }]}>
+            <ModernCard variant="elevated" style={[styles.formCard, { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder }] as any}>
  
               {/* Mood */}
               <View style={styles.section}>

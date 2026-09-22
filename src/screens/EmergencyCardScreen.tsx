@@ -172,7 +172,7 @@ export default function EmergencyCardScreen() {
 
         {/* Footer note */}
         <Text style={styles.footer}>
-          This card uses information from your AccessAid profile.{'\n'}
+          This card uses information from your EverySense profile.{'\n'}
           Keep your profile updated to ensure accuracy.
         </Text>
 

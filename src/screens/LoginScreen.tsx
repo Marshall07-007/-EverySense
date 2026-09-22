@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,7 +19,7 @@ import {
 } from 'react-native';
 import { AppTheme, getThemeConfig } from '../../constants/theme';
 import { supabase } from '../../lib/supabase';
-import { AccessAidLogo } from '../components/AccessAidLogo';
+import { EverySenseLogo } from '../components/EverySenseLogo';
 import { BackgroundLogo } from '../components/BackgroundLogo';
 import { ModernButton } from '../components/ModernButton';
 import { ModernCard } from '../components/ModernCard';
@@ -70,16 +71,13 @@ const LoginScreen = () => {
   const placeholderColor = theme.placeholder;
 
   useEffect(() => {
-    speakText('Welcome to AccessAid. You can sign in or create a new account.');
+    speakText('Welcome to EverySense. You can sign in or create a new account.');
   }, []);
 
   const speakText = (text: string) => {
     if (!state.voiceAnnouncementsEnabled) return;
-    try { Speech.stop(); } catch {}
-    try {
-      const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
-      Speech.speak(text, { rate: safeRate, pitch: 1.0 });
-    } catch {}
+    const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
+    ttsSpeakText(text, { rate: safeRate, pitch: 1.0 });
   };
 
   const validateEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -118,7 +116,7 @@ const LoginScreen = () => {
       };
       await AsyncStorage.setItem('user', JSON.stringify(appUser));
       dispatch({ type: 'LOGIN', payload: appUser });
-      speakText('Login successful! Welcome to AccessAid.');
+      speakText('Login successful! Welcome to EverySense.');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error: any) {
       Alert.alert('Login Failed', error.message || 'Invalid email or PIN.');
@@ -170,7 +168,7 @@ const LoginScreen = () => {
       };
       await AsyncStorage.setItem('user', JSON.stringify(appUser));
       dispatch({ type: 'LOGIN', payload: appUser });
-      speakText('Account created successfully! Welcome to AccessAid.');
+      speakText('Account created successfully! Welcome to EverySense.');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error: any) {
       if (error.message?.includes('already registered')) {
@@ -201,13 +199,10 @@ const LoginScreen = () => {
     const newState = !state.voiceAnnouncementsEnabled;
     dispatch({ type: 'TOGGLE_VOICE_ANNOUNCEMENTS', payload: newState });
     if (newState) {
-      try { Speech.stop(); } catch {}
-      try {
-        const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
-        Speech.speak('Voice announcements enabled', { rate: safeRate, pitch: 1.0 });
-      } catch {}
+      const safeRate = Math.max(0.5, Math.min(state.accessibilitySettings.voiceSpeed, 2.0));
+      ttsSpeakText('Voice announcements enabled', { rate: safeRate, pitch: 1.0 });
     } else {
-      try { Speech.stop(); } catch {}
+      ttsStopSpeaking();
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
@@ -257,10 +252,10 @@ const LoginScreen = () => {
     // ── Web (Chrome / Expo web) ──────────────────────────────────────────────
     if (Platform.OS === 'web') {
       const SRWeb =
-        (global as any).webkitSpeechRecognition ||
-        (window as any).webkitSpeechRecognition ||
-        (global as any).SpeechRecognition ||
-        (window as any).SpeechRecognition;
+        (globalThis as any).webkitSpeechRecognition ||
+        (typeof window !== 'undefined' && (window as any).webkitSpeechRecognition) ||
+        (globalThis as any).SpeechRecognition ||
+        (typeof window !== 'undefined' && (window as any).SpeechRecognition);
 
       if (!SRWeb) {
         Alert.alert('Not Available', 'Voice input is not supported in this browser.');
@@ -413,7 +408,7 @@ const LoginScreen = () => {
       };
       await AsyncStorage.setItem('user', JSON.stringify(appUser));
       dispatch({ type: 'LOGIN', payload: appUser });
-      speakText('PIN reset successfully! Welcome back to AccessAid.');
+      speakText('PIN reset successfully! Welcome back to EverySense.');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error: any) {
       Alert.alert('Reset Failed', error.message || 'Invalid or expired code. Please try again.');
@@ -436,9 +431,10 @@ const LoginScreen = () => {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
-            <AccessAidLogo size={100} showText={true} />
-            <Text style={styles.welcomeText}>Welcome to AccessAid</Text>
-            <Text style={styles.subtitleText}>Your intelligent accessibility companion</Text>
+            <EverySenseLogo size={64} showText={false} />
+            <Text style={styles.brandTitleText}>EVERYSENSE</Text>
+            <Text style={styles.welcomeText}>Welcome to EverySense</Text>
+            <Text style={styles.subtitleText}>Understand what matters. Take the next step with confidence.</Text>
           </View>
 
           <ModernCard variant="elevated" style={styles.formContainer}>
@@ -748,22 +744,28 @@ const createStyles = (theme: AppTheme) =>
       alignItems: 'center',
       marginBottom: 40,
     },
+    brandTitleText: {
+      fontSize: 13,
+      fontWeight: '600',
+      letterSpacing: 3,
+      color: theme.accent, // Champagne Gold
+      marginTop: 14,
+      marginBottom: 6,
+    },
     welcomeText: {
-      fontSize: 32,
-      fontWeight: 'bold',
-      color: theme.textInverted,
-      marginTop: 20,
+      fontSize: 26,
+      fontWeight: '700',
+      color: theme.textPrimary,
       textAlign: 'center',
-      textShadowColor: 'rgba(0, 0, 0, 0.35)',
-      textShadowOffset: { width: 0, height: 3 },
-      textShadowRadius: 6,
+      letterSpacing: 0.2,
     },
     subtitleText: {
-      fontSize: 18,
-      color: theme.textInverted,
-      opacity: 0.9,
+      fontSize: 14,
+      color: theme.textSecondary,
       marginTop: 8,
       textAlign: 'center',
+      lineHeight: 20,
+      maxWidth: 300,
     },
     formContainer: {
       padding: 30,

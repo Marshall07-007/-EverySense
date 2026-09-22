@@ -472,7 +472,7 @@ const s = StyleSheet.create({
   pendingImg:          { width: 60, height: 60, borderRadius: 10 },
   pendingRemove:       { position: 'absolute', top: 6, left: 54 },
   pendingRemoveCircle: { width: 20, height: 20, borderRadius: 10, backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center' },
-  pendingUploadOverlay:{ ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+  pendingUploadOverlay:{ ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
 
   // Input bar
   inputBar:    { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 10, paddingVertical: 10, borderTopWidth: 1 },

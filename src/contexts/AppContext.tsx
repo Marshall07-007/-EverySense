@@ -40,7 +40,7 @@ const initialState: AppState = {
     brightness: 50,
     textZoom: 100,
     voiceSpeed: 1.0,
-    isDarkMode: false,
+    isDarkMode: true,
   },
   isVoiceEnabled: false,
   voiceAnnouncementsEnabled: true,

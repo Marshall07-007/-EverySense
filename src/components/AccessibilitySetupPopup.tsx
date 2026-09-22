@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Brightness from 'expo-brightness';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Speech from 'expo-speech';
+import { speakText as ttsSpeakText, stopSpeaking as ttsStopSpeaking } from '../services/ttsService';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Animated,
@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { AppTheme, getThemeConfig } from '../../constants/theme';
 import { useApp } from '../contexts/AppContext';
-import { AccessAidLogo } from './AccessAidLogo';
+import { EverySenseLogo } from './EverySenseLogo';
 import { ModernButton } from './ModernButton';
 
 const { height: screenHeight } = Dimensions.get('window');
@@ -160,25 +160,24 @@ export const AccessibilitySetupPopup: React.FC<AccessibilitySetupPopupProps> = (
 
   const speakText = (text: string) => {
     if (!state.voiceAnnouncementsEnabled) return;
-    Speech.speak(text, {
+    ttsSpeakText(text, {
       rate: voiceSpeed,
       pitch: 1.0,
-      quality: Speech.VoiceQuality.Enhanced,
     });
   };
 
   const handleSaveAndContinue = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    speakText('Settings saved successfully. Welcome to AccessAid!');
+    speakText('Settings saved successfully. Welcome to EverySense!');
     onSave({ brightness, textZoom, voiceSpeed });
     Brightness.setBrightnessAsync(brightness / 100);
   };
 
   const resolvedTheme = useMemo(() => theme ?? getThemeConfig(false), [theme]);
   const styles = useMemo(() => createStyles(resolvedTheme), [resolvedTheme]);
-  const popupGradient = resolvedTheme.isDark
+  const popupGradient = (resolvedTheme.isDark
     ? ['#1F2937', '#0B1120']
-    : ['#FFFFFF', '#F8F9FA'];
+    : ['#FFFFFF', '#F8F9FA']) as [string, string, ...string[]];
 
   return (
     <Modal
@@ -201,7 +200,7 @@ export const AccessibilitySetupPopup: React.FC<AccessibilitySetupPopupProps> = (
 
             {/* Header */}
             <View style={styles.header}>
-              <AccessAidLogo size={32} showText={false} />
+              <EverySenseLogo size={32} showText={false} />
               <View style={styles.headerText}>
                 <Text style={styles.title}>Accessibility Setup</Text>
                 <Text style={styles.subtitle}>Customize your experience</Text>
